@@ -20,6 +20,7 @@ const state = {
   timerId: null,
   remainingSeconds: durations.focus * 60,
   sessionCount: 0,
+  transitionMessage: "Ready for your first focus session.",
   goal: "",
   sessionsLeft: 0,
   goalDraft: "",
@@ -135,6 +136,7 @@ function enterDashboardWithCamera() {
 function setMode(mode) {
   stopTimer();
   state.mode = mode;
+  state.transitionMessage = `${modeNames[mode]} selected. Timer reset.`;
   resetRemainingSeconds();
   render();
 }
@@ -142,6 +144,7 @@ function setMode(mode) {
 function changeDuration(delta) {
   stopTimer();
   durations[state.mode] = Math.max(1, Math.min(99, durations[state.mode] + delta));
+  state.transitionMessage = `${modeNames[state.mode]} duration set to ${durations[state.mode]} minutes.`;
   resetRemainingSeconds();
   render();
 }
@@ -156,8 +159,7 @@ function startTimer() {
   state.timerId = window.setInterval(() => {
     state.remainingSeconds = Math.max(0, state.remainingSeconds - 1);
     if (state.remainingSeconds === 0) {
-      stopTimer();
-      if (state.mode === "focus") state.sessionCount += 1;
+      transitionToNextMode();
     }
     render();
   }, 1000);
@@ -184,7 +186,28 @@ function toggleTimer() {
 function resetTimer() {
   stopTimer();
   resetRemainingSeconds();
+  state.transitionMessage = `${modeNames[state.mode]} reset to ${durations[state.mode]} minutes.`;
   render();
+}
+
+function transitionToNextMode() {
+  if (state.mode === "focus") {
+    state.sessionCount += 1;
+    if (state.sessionsLeft > 0) state.sessionsLeft -= 1;
+
+    const nextMode = state.sessionCount % 4 === 0 ? "long" : "short";
+    state.mode = nextMode;
+    resetRemainingSeconds();
+    state.transitionMessage = nextMode === "long"
+      ? "Focus complete. Starting a long break after 4 focus sessions."
+      : "Focus complete. Starting a short break.";
+    return;
+  }
+
+  const completedBreak = modeNames[state.mode];
+  state.mode = "focus";
+  resetRemainingSeconds();
+  state.transitionMessage = `${completedBreak} complete. Starting the next focus session.`;
 }
 
 function setGoal(event) {
@@ -373,6 +396,10 @@ function renderDashboard() {
         <article class="timer-card">
           <h3>Feedback</h3>
           <p>${feedback}</p>
+        </article>
+        <article class="timer-card transition-card">
+          <h3>Cycle transition</h3>
+          <p>${state.transitionMessage}</p>
         </article>
       </div>
       <div class="bottom-controls">
