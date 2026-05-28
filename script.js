@@ -21,6 +21,20 @@ const state = {
   remainingSeconds: durations.focus * 60,
   sessionCount: 0,
   transitionMessage: "Ready for your first focus session.",
+  webgazerStatus: "Camera ready. Tracking will start with your next Focus session.",
+  webgazerActive: false,
+  webgazerDebugVisible: false,
+  webgazerBeginStatus: "not-started",
+  webgazerBeginError: "",
+  webgazerBeginStack: "",
+  developerDiagnostics: false,
+  calibrationClickCount: 0,
+  calibrationProgress: [],
+  gazeSession: null,
+  latestGazeLog: null,
+  latestGazeLogUrl: "",
+  latestGazeLogFileName: "",
+  lastGazeSampleAt: 0,
   goal: "",
   sessionsLeft: 0,
   goalDraft: "",
@@ -55,6 +69,8 @@ const modeNames = {
   short: "Short break",
   long: "Long break",
 };
+
+const webgazerFaceMeshSolutionPath = "https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619";
 
 function setView(view) {
   state.view = view;
@@ -120,6 +136,7 @@ function friendlyCameraError(error) {
 }
 
 function continueStandardMode() {
+  stopWebGazerLogging("standard-mode");
   stopCamera();
   state.webcamEnabled = false;
   state.cameraPermission = "standard";
@@ -127,13 +144,23 @@ function continueStandardMode() {
   setView("dashboard");
 }
 
-function enterDashboardWithCamera() {
+function enterTrackingSetup() {
   state.webcamEnabled = true;
   state.cameraPermission = "granted";
+  state.webgazerStatus = "Camera ready. Tracking will start with your next Focus session.";
+  setView("trackingSetup");
+}
+
+function finishTrackingSetup() {
+  stopCamera();
+  state.webcamEnabled = true;
+  state.cameraPermission = "granted";
+  state.webgazerStatus = "Camera ready. Tracking will start with your next Focus session.";
   setView("dashboard");
 }
 
 function setMode(mode) {
+  if (state.mode === "focus") finalizeGazeLog("manual-mode-change");
   stopTimer();
   state.mode = mode;
   state.transitionMessage = `${modeNames[mode]} selected. Timer reset.`;
@@ -142,6 +169,7 @@ function setMode(mode) {
 }
 
 function changeDuration(delta) {
+  if (state.mode === "focus") finalizeGazeLog("duration-change");
   stopTimer();
   durations[state.mode] = Math.max(1, Math.min(99, durations[state.mode] + delta));
   state.transitionMessage = `${modeNames[state.mode]} duration set to ${durations[state.mode]} minutes.`;
@@ -156,6 +184,7 @@ function resetRemainingSeconds() {
 function startTimer() {
   if (state.timerId) return;
   state.isRunning = true;
+  if (state.mode === "focus") startWebGazerLogging();
   state.timerId = window.setInterval(() => {
     state.remainingSeconds = Math.max(0, state.remainingSeconds - 1);
     if (state.remainingSeconds === 0) {
@@ -171,6 +200,7 @@ function stopTimer() {
     state.timerId = null;
   }
   state.isRunning = false;
+  pauseWebGazerLogging();
 }
 
 function toggleTimer() {
@@ -184,6 +214,7 @@ function toggleTimer() {
 }
 
 function resetTimer() {
+  if (state.mode === "focus") finalizeGazeLog("reset");
   stopTimer();
   resetRemainingSeconds();
   state.transitionMessage = `${modeNames[state.mode]} reset to ${durations[state.mode]} minutes.`;
@@ -192,6 +223,7 @@ function resetTimer() {
 
 function transitionToNextMode() {
   if (state.mode === "focus") {
+    finalizeGazeLog("focus-complete");
     state.sessionCount += 1;
     if (state.sessionsLeft > 0) state.sessionsLeft -= 1;
 
@@ -208,6 +240,336 @@ function transitionToNextMode() {
   state.mode = "focus";
   resetRemainingSeconds();
   state.transitionMessage = `${completedBreak} complete. Starting the next focus session.`;
+  if (state.isRunning) startWebGazerLogging();
+}
+
+function canUseWebGazer() {
+  return Boolean(window.webgazer && typeof window.webgazer.setGazeListener === "function");
+}
+
+function configureWebGazerAssetPath() {
+  if (!window.webgazer || !window.webgazer.params) return;
+  const currentPath = window.webgazer.params.faceMeshSolutionPath || "";
+  if (currentPath === webgazerFaceMeshSolutionPath) return;
+  window.webgazer.params.faceMeshSolutionPath = webgazerFaceMeshSolutionPath;
+}
+
+function startWebGazerLogging() {
+  if (!state.webcamEnabled || state.mode !== "focus") {
+    state.webgazerStatus = "Camera ready. Tracking will start with your next Focus session.";
+    return;
+  }
+
+  if (!canUseWebGazer()) {
+    state.webgazerStatus = "Tracking unavailable in this browser. The timer will keep working.";
+    return;
+  }
+
+  if (!state.gazeSession) {
+    state.gazeSession = {
+      id: `gazodoro-${new Date().toISOString()}`,
+      startedAt: Date.now(),
+      mode: "focus",
+      samples: [],
+      callbackCount: 0,
+      validSampleCount: 0,
+      invalidSampleCount: 0,
+      lastCallbackAt: null,
+      lastRawDataWasNull: null,
+      endedAt: null,
+      endReason: null,
+    };
+    state.lastGazeSampleAt = 0;
+  }
+
+  window.saveDataAcrossSessions = false;
+  state.webgazerActive = true;
+  state.webgazerStatus = "Tracking active. Keep your face centered.";
+
+  try {
+    const webgazer = window.webgazer;
+    configureWebGazerAssetPath();
+    if (typeof webgazer.saveDataAcrossSessions === "function") {
+      webgazer.saveDataAcrossSessions(false);
+    }
+    if (typeof webgazer.showVideoPreview === "function") webgazer.showVideoPreview(state.webgazerDebugVisible);
+    if (typeof webgazer.showPredictionPoints === "function") webgazer.showPredictionPoints(state.webgazerDebugVisible);
+    if (typeof webgazer.showFaceOverlay === "function") webgazer.showFaceOverlay(state.webgazerDebugVisible);
+    if (typeof webgazer.showFaceFeedbackBox === "function") webgazer.showFaceFeedbackBox(state.webgazerDebugVisible);
+
+    webgazer.setGazeListener((data) => {
+      if (!state.webgazerActive || !state.gazeSession || state.mode !== "focus" || !state.isRunning) return;
+
+      const now = Date.now();
+      state.gazeSession.callbackCount += 1;
+      state.gazeSession.lastCallbackAt = now;
+      state.gazeSession.lastRawDataWasNull = data == null;
+
+      if (now - state.lastGazeSampleAt < 1000) return;
+      state.lastGazeSampleAt = now;
+
+      const valid = Boolean(data && Number.isFinite(data.x) && Number.isFinite(data.y));
+      if (valid) {
+        state.gazeSession.validSampleCount += 1;
+        state.webgazerStatus = "Tracking active. Keep your face centered.";
+      } else {
+        state.gazeSession.invalidSampleCount += 1;
+        state.webgazerStatus = "Face not detected. Adjust lighting or center your face.";
+      }
+
+      state.gazeSession.samples.push({
+        elapsedMs: now - state.gazeSession.startedAt,
+        x: valid ? Math.round(data.x) : null,
+        y: valid ? Math.round(data.y) : null,
+        valid,
+      });
+    });
+
+    if (typeof webgazer.begin === "function") {
+      state.webgazerBeginStatus = "starting";
+      state.webgazerBeginError = "";
+      state.webgazerBeginStack = "";
+      const beginResult = webgazer.begin();
+      if (beginResult && typeof beginResult.then === "function") {
+        beginResult
+          .then(() => {
+            state.webgazerBeginStatus = "resolved";
+            if (state.webgazerActive) {
+              state.webgazerStatus = "Tracking active. Keep your face centered.";
+              render();
+            }
+          })
+          .catch((error) => {
+            state.webgazerBeginStatus = "rejected";
+            state.webgazerBeginError = error && error.message ? error.message : "Unknown WebGazer begin error.";
+            state.webgazerBeginStack = error && error.stack ? error.stack : "";
+            console.error("WebGazer begin failed", error);
+            state.webgazerActive = false;
+            state.webgazerStatus = friendlyTrackingError(error);
+            render();
+          });
+      } else {
+        state.webgazerBeginStatus = "called";
+      }
+    }
+  } catch (error) {
+    state.webgazerActive = false;
+    state.webgazerBeginStatus = "threw";
+    state.webgazerBeginError = error && error.message ? error.message : "Unknown WebGazer start error.";
+    state.webgazerBeginStack = error && error.stack ? error.stack : "";
+    console.error("WebGazer start failed", error);
+    state.webgazerStatus = friendlyTrackingError(error);
+  }
+}
+
+function friendlyTrackingError(error) {
+  const message = error && error.message ? error.message : "";
+  if (message.includes("Failed to fetch")) {
+    return "Tracking setup could not load. Check your connection and keep using the timer.";
+  }
+  if (!canUseWebGazer()) {
+    return "Tracking is not supported in this browser. Standard timer mode is still available.";
+  }
+  return "Tracking unavailable right now. The timer will keep working.";
+}
+
+function pauseWebGazerLogging() {
+  if (!state.webgazerActive) return;
+  state.webgazerActive = false;
+  if (state.gazeSession) {
+    state.webgazerStatus = "Tracking paused.";
+  }
+}
+
+function stopWebGazerLogging(reason = "stopped") {
+  if (canUseWebGazer()) {
+    try {
+      window.webgazer.setGazeListener(null);
+      if (typeof window.webgazer.pause === "function") window.webgazer.pause();
+    } catch {
+      // Timer stability matters more than WebGazer cleanup in this prototype.
+    }
+  }
+  state.webgazerActive = false;
+  if (!state.gazeSession) {
+    state.webgazerStatus = "Camera ready. Tracking will start with your next Focus session.";
+    return;
+  }
+  state.webgazerStatus = "Tracking stopped.";
+}
+
+function finalizeGazeLog(reason) {
+  if (!state.gazeSession) {
+    stopWebGazerLogging(reason);
+    return;
+  }
+
+  const endedAt = Date.now();
+  const log = {
+    app: "Gazodoro",
+    type: "webgazer-focus-session-log",
+    version: 1,
+    sessionId: state.gazeSession.id,
+    startedAt: new Date(state.gazeSession.startedAt).toISOString(),
+    endedAt: new Date(endedAt).toISOString(),
+    durationMs: endedAt - state.gazeSession.startedAt,
+    endReason: reason,
+    sampleIntervalMs: 1000,
+    debug: {
+      beginStatus: state.webgazerBeginStatus,
+      beginError: state.webgazerBeginError,
+      beginStack: state.webgazerBeginStack,
+      callbackCount: state.gazeSession.callbackCount,
+      validSampleCount: state.gazeSession.validSampleCount,
+      invalidSampleCount: state.gazeSession.invalidSampleCount,
+      lastCallbackAt: state.gazeSession.lastCallbackAt
+        ? new Date(state.gazeSession.lastCallbackAt).toISOString()
+        : null,
+      lastRawDataWasNull: state.gazeSession.lastRawDataWasNull,
+    },
+    privacy: {
+      localOnly: true,
+      rawImagesStored: false,
+      rawVideoStored: false,
+      uploadedToServer: false,
+    },
+    samples: state.gazeSession.samples,
+  };
+
+  stopWebGazerLogging(reason);
+  state.latestGazeLog = log;
+  state.latestGazeLogFileName = `gazodoro-session-log-${new Date(endedAt).toISOString().replace(/[:.]/g, "-")}.csv`;
+  state.gazeSession = null;
+
+  if (state.latestGazeLogUrl) URL.revokeObjectURL(state.latestGazeLogUrl);
+  state.latestGazeLogUrl = URL.createObjectURL(new Blob([toGazeLogCsv(log)], {
+    type: "text/csv",
+  }));
+  state.webgazerStatus = "Focus session saved locally.";
+}
+
+function downloadLatestGazeLog() {
+  if (!state.latestGazeLog || !state.latestGazeLogUrl) return;
+  const link = document.createElement("a");
+  link.href = state.latestGazeLogUrl;
+  link.download = state.latestGazeLogFileName || "gazodoro-session-log.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function recordCalibrationPoint(target) {
+  const rect = target.getBoundingClientRect();
+  const x = Math.round(rect.left + rect.width / 2);
+  const y = Math.round(rect.top + rect.height / 2);
+  const pointId = target.dataset.calibrationPoint;
+  state.calibrationClickCount += 1;
+  if (pointId && !state.calibrationProgress.includes(pointId)) {
+    state.calibrationProgress.push(pointId);
+  }
+
+  if (canUseWebGazer() && typeof window.webgazer.recordScreenPosition === "function") {
+    try {
+      window.webgazer.recordScreenPosition(x, y, "click");
+      state.webgazerStatus = "Calibration point saved.";
+    } catch {
+      state.webgazerStatus = "Calibration point skipped. You can continue.";
+    }
+  } else {
+    state.webgazerStatus = "Camera ready. Tracking will start with your next Focus session.";
+  }
+
+  render();
+}
+
+function toGazeLogCsv(log) {
+  const rows = [[
+    "sessionId",
+    "startedAt",
+    "endedAt",
+    "durationMs",
+    "endReason",
+    "sampleIntervalMs",
+    "beginStatus",
+    "beginError",
+    "beginStack",
+    "callbackCount",
+    "validSampleCount",
+    "invalidSampleCount",
+    "lastCallbackAt",
+    "lastRawDataWasNull",
+    "localOnly",
+    "rawImagesStored",
+    "rawVideoStored",
+    "uploadedToServer",
+    "elapsedMs",
+    "x",
+    "y",
+    "valid",
+  ]];
+
+  if (!log.samples.length) {
+    rows.push([
+      log.sessionId,
+      log.startedAt,
+      log.endedAt,
+      log.durationMs,
+      log.endReason,
+      log.sampleIntervalMs,
+      log.debug.beginStatus,
+      log.debug.beginError,
+      log.debug.beginStack,
+      log.debug.callbackCount,
+      log.debug.validSampleCount,
+      log.debug.invalidSampleCount,
+      log.debug.lastCallbackAt,
+      log.debug.lastRawDataWasNull,
+      log.privacy.localOnly,
+      log.privacy.rawImagesStored,
+      log.privacy.rawVideoStored,
+      log.privacy.uploadedToServer,
+      "",
+      "",
+      "",
+      "",
+    ]);
+  } else {
+    log.samples.forEach((sample) => {
+      rows.push([
+        log.sessionId,
+        log.startedAt,
+        log.endedAt,
+        log.durationMs,
+        log.endReason,
+        log.sampleIntervalMs,
+        log.debug.beginStatus,
+        log.debug.beginError,
+        log.debug.beginStack,
+        log.debug.callbackCount,
+        log.debug.validSampleCount,
+        log.debug.invalidSampleCount,
+        log.debug.lastCallbackAt,
+        log.debug.lastRawDataWasNull,
+        log.privacy.localOnly,
+        log.privacy.rawImagesStored,
+        log.privacy.rawVideoStored,
+        log.privacy.uploadedToServer,
+        sample.elapsedMs,
+        sample.x,
+        sample.y,
+        sample.valid,
+      ]);
+    });
+  }
+
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function csvCell(value) {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  if (/[",\n\r]/.test(text)) return `"${text.replaceAll('"', '""')}"`;
+  return text;
 }
 
 function setGoal(event) {
@@ -231,6 +593,7 @@ function toggleAppearance(value) {
 
 async function toggleCameraFromSettings() {
   if (state.webcamEnabled) {
+    if (state.mode === "focus") finalizeGazeLog("camera-disabled");
     stopCamera();
     state.webcamEnabled = false;
     state.cameraPermission = "standard";
@@ -256,6 +619,7 @@ function render() {
     welcome: renderWelcome,
     privacy: renderPrivacy,
     cameraPreview: renderCameraPreview,
+    trackingSetup: renderTrackingSetup,
     dashboard: renderDashboard,
     settings: renderSettings,
   }[state.view]();
@@ -337,7 +701,7 @@ function renderCameraPreview() {
               <label class="field-label" for="cameraSelect">Select camera</label>
               <select class="select" id="cameraSelect">${options}</select>
             </div>
-            <button class="primary-button" data-action="cameraDashboard">Continue with camera</button>
+            <button class="primary-button" data-action="trackingSetup">Set up tracking</button>
             <button class="secondary-button" data-action="standardMode">Continue without camera</button>
           </div>
         </div>
@@ -347,12 +711,52 @@ function renderCameraPreview() {
   `;
 }
 
+function renderTrackingSetup() {
+  const completed = state.calibrationProgress.length;
+  const setupReady = completed >= 5;
+
+  return `
+    <section class="center-screen">
+      <div class="tracking-setup-screen">
+        <h1 class="section-title" style="text-align:center">Tracking setup</h1>
+        <div class="panel tracking-setup-panel">
+          <div>
+            <label class="field-label">Camera check</label>
+            <div class="preview-box">
+              ${state.stream ? '<video id="cameraPreview" muted playsinline></video>' : '<div class="spinner" aria-label="Loading camera preview"></div>'}
+            </div>
+            <p class="tip">Keep your face centered with steady lighting.</p>
+          </div>
+          <div class="tracking-checklist">
+            <div class="tracking-status-badge">${setupReady ? "Ready to focus" : "Quick calibration"}</div>
+            <h2>Look at each point and tap it once</h2>
+            <p>This helps the timer understand your screen position before focus begins.</p>
+            ${renderSetupCalibrationTargets()}
+            <div class="setup-progress" aria-label="Calibration progress">
+              <span style="width:${completed * 20}%"></span>
+            </div>
+            <p class="tip">${completed}/5 points complete</p>
+            <button class="primary-button" data-action="finishTrackingSetup">
+              ${setupReady ? "Continue to dashboard" : "Continue anyway"}
+            </button>
+            <button class="secondary-button" data-action="standardMode">Use Standard Mode</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderDashboard() {
   const cameraClass = state.webcamEnabled ? "camera" : "";
   const cameraLabel = state.webcamEnabled ? "Camera mode" : "No-camera mode";
   const feedback = state.webcamEnabled
-    ? "Camera preview is enabled. Engagement classification will be added later."
+    ? "Tracking stays local to this browser. No webcam images or video are saved."
     : "Standard Mode active. Webcam detection is off, but timer controls remain available.";
+  const trackingStateClass = state.webgazerActive ? "active" : state.webcamEnabled ? "ready" : "off";
+  const trackingTitle = state.webcamEnabled
+    ? state.webgazerActive ? "Tracking active" : "Camera ready"
+    : "Standard Mode";
 
   return `
     <section class="app-shell dashboard ${cameraClass}">
@@ -394,12 +798,17 @@ function renderDashboard() {
           <p>${state.webcamEnabled ? "Placeholder: ready for future gaze signal." : "Unavailable in Standard Mode."}</p>
         </article>
         <article class="timer-card">
-          <h3>Feedback</h3>
+          <h3>Privacy</h3>
           <p>${feedback}</p>
         </article>
         <article class="timer-card transition-card">
           <h3>Cycle transition</h3>
           <p>${state.transitionMessage}</p>
+        </article>
+        <article class="timer-card">
+          <h3>Tracking</h3>
+          <div class="tracking-pill ${trackingStateClass}"><span></span>${trackingTitle}</div>
+          <p>${state.webcamEnabled ? state.webgazerStatus : "Webcam detection is off."}</p>
         </article>
       </div>
       <div class="bottom-controls">
@@ -411,6 +820,26 @@ function renderDashboard() {
         <button class="round-button" data-action="settings" aria-label="Open settings">${icons.gear}</button>
       </div>
     </section>
+  `;
+}
+
+function renderSetupCalibrationTargets() {
+  const positions = [
+    "middle-center",
+    "top-left",
+    "top-right",
+    "bottom-left",
+    "bottom-right",
+  ];
+
+  return `
+    <div class="setup-target-grid" aria-label="Tracking setup points">
+      ${positions.map((position, index) => `
+        <button class="setup-target ${position} ${state.calibrationProgress.includes(String(index + 1)) ? "done" : ""}" data-calibration-point="${index + 1}" aria-label="Tracking point ${index + 1}">
+          <span>${state.calibrationProgress.includes(String(index + 1)) ? "OK" : index + 1}</span>
+        </button>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -547,13 +976,65 @@ function renderSoundSettings() {
 }
 
 function renderStatisticsSettings() {
+  const hasLog = Boolean(state.latestGazeLog);
+  const diagnostics = state.latestGazeLog
+    ? state.latestGazeLog.debug
+    : state.gazeSession
+      ? {
+          beginStatus: state.webgazerBeginStatus,
+          beginError: state.webgazerBeginError,
+          callbackCount: state.gazeSession.callbackCount,
+          validSampleCount: state.gazeSession.validSampleCount,
+          invalidSampleCount: state.gazeSession.invalidSampleCount,
+          lastCallbackAt: state.gazeSession.lastCallbackAt
+            ? new Date(state.gazeSession.lastCallbackAt).toISOString()
+            : null,
+        }
+      : null;
+
   return `
     <div class="panel">
       <div class="setting-copy">
         <h2>Statistics & Analytics</h2>
-        <p>View your focus analytics and session history from the main dashboard.</p>
+        <p>Session data stays local to this browser until you export it.</p>
       </div>
-      <button class="wide-button" data-action="statsShortcut">View Analytics</button>
+      <div class="setting-item">
+        <div class="setting-copy">
+          <h2>Latest session data</h2>
+          <p>${hasLog ? "A local focus session file is ready to export." : "Complete or reset a Focus session to create an export."}</p>
+        </div>
+        <button class="download-log-button compact" data-action="downloadGazeLog" ${hasLog ? "" : "disabled"}>
+          Export latest session data
+        </button>
+      </div>
+      <div class="setting-item">
+        <div class="setting-copy">
+          <h2>Developer diagnostics</h2>
+          <p>Hidden by default for normal use.</p>
+        </div>
+        <button class="toggle ${state.developerDiagnostics ? "on" : ""}" data-action="toggleDiagnostics" aria-label="Toggle developer diagnostics"></button>
+      </div>
+      ${state.developerDiagnostics ? renderDiagnosticsPanel(diagnostics) : ""}
+    </div>
+  `;
+}
+
+function renderDiagnosticsPanel(diagnostics) {
+  if (!diagnostics) {
+    return `
+      <div class="diagnostics-panel">
+        <p>No tracking diagnostics are available yet.</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="diagnostics-panel">
+      <div><span>Begin</span><strong>${escapeHtml(diagnostics.beginStatus || "not-started")}</strong></div>
+      <div><span>Callbacks</span><strong>${diagnostics.callbackCount || 0}</strong></div>
+      <div><span>Valid</span><strong>${diagnostics.validSampleCount || 0}</strong></div>
+      <div><span>Invalid/null</span><strong>${diagnostics.invalidSampleCount || 0}</strong></div>
+      ${diagnostics.beginError ? `<p>${escapeHtml(diagnostics.beginError)}</p>` : ""}
     </div>
   `;
 }
@@ -679,6 +1160,10 @@ function attachHandlers() {
       }
     }
   });
+
+  document.querySelectorAll("[data-calibration-point]").forEach((node) => {
+    node.addEventListener("click", (event) => recordCalibrationPoint(event.currentTarget));
+  });
 }
 
 function handleAction(event) {
@@ -686,7 +1171,8 @@ function handleAction(event) {
   if (action === "privacy") setView("privacy");
   if (action === "enableCamera") requestCamera();
   if (action === "standardMode") continueStandardMode();
-  if (action === "cameraDashboard") enterDashboardWithCamera();
+  if (action === "trackingSetup") enterTrackingSetup();
+  if (action === "finishTrackingSetup") finishTrackingSetup();
   if (action === "increaseTime") changeDuration(1);
   if (action === "decreaseTime") changeDuration(-1);
   if (action === "toggleRunning") {
@@ -709,6 +1195,11 @@ function handleAction(event) {
   if (action === "toggleCameraSetting") toggleCameraFromSettings();
   if (action === "toggleSound") {
     state.soundNotification = !state.soundNotification;
+    render();
+  }
+  if (action === "downloadGazeLog") downloadLatestGazeLog();
+  if (action === "toggleDiagnostics") {
+    state.developerDiagnostics = !state.developerDiagnostics;
     render();
   }
 }
