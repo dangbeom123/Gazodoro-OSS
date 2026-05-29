@@ -35,6 +35,17 @@ const state = {
   latestGazeLogUrl: "",
   latestGazeLogFileName: "",
   lastGazeSampleAt: 0,
+  debugSession: {
+    surveys: [],
+  },
+  latestSurveyResult: null,
+  surveyVisible: false,
+  pendingBreakMode: "",
+  surveyDraft: {
+    focusLevel: null,
+    fatigueLevel: null,
+    comment: "",
+  },
   goal: "",
   sessionsLeft: 0,
   goalDraft: "",
@@ -216,6 +227,7 @@ function toggleTimer() {
 function resetTimer() {
   if (state.mode === "focus") finalizeGazeLog("reset");
   stopTimer();
+  closeSurvey();
   resetRemainingSeconds();
   state.transitionMessage = `${modeNames[state.mode]} reset to ${durations[state.mode]} minutes.`;
   render();
@@ -228,11 +240,8 @@ function transitionToNextMode() {
     if (state.sessionsLeft > 0) state.sessionsLeft -= 1;
 
     const nextMode = state.sessionCount % 4 === 0 ? "long" : "short";
-    state.mode = nextMode;
-    resetRemainingSeconds();
-    state.transitionMessage = nextMode === "long"
-      ? "Focus complete. Starting a long break after 4 focus sessions."
-      : "Focus complete. Starting a short break.";
+    stopTimer();
+    openPostSessionSurvey(nextMode);
     return;
   }
 
@@ -241,6 +250,80 @@ function transitionToNextMode() {
   resetRemainingSeconds();
   state.transitionMessage = `${completedBreak} complete. Starting the next focus session.`;
   if (state.isRunning) startWebGazerLogging();
+}
+
+function openPostSessionSurvey(nextMode) {
+  state.pendingBreakMode = nextMode;
+  state.surveyVisible = true;
+  state.surveyDraft = {
+    focusLevel: null,
+    fatigueLevel: null,
+    comment: "",
+  };
+  state.transitionMessage = "Focus complete. Share a quick reflection before your break starts.";
+}
+
+function closeSurvey() {
+  state.surveyVisible = false;
+  state.pendingBreakMode = "";
+  state.surveyDraft = {
+    focusLevel: null,
+    fatigueLevel: null,
+    comment: "",
+  };
+}
+
+function setSurveyRating(field, value) {
+  state.surveyDraft[field] = Number(value);
+  render();
+}
+
+function submitPostSessionSurvey() {
+  if (!state.surveyDraft.focusLevel || !state.surveyDraft.fatigueLevel) return;
+
+  storeSurveyResult({
+    skipped: false,
+    focusLevel: state.surveyDraft.focusLevel,
+    fatigueLevel: state.surveyDraft.fatigueLevel,
+    comment: state.surveyDraft.comment.trim(),
+  });
+  startPendingBreak("Survey saved. Starting your break.");
+}
+
+function skipPostSessionSurvey() {
+  storeSurveyResult({
+    skipped: true,
+    focusLevel: null,
+    fatigueLevel: null,
+    comment: "",
+  });
+  startPendingBreak("Survey skipped. Starting your break.");
+}
+
+function storeSurveyResult(result) {
+  const surveyResult = {
+    id: `survey-${Date.now()}`,
+    sessionNumber: state.sessionCount,
+    completedAt: new Date().toISOString(),
+    focusDurationMinutes: durations.focus,
+    nextBreakMode: state.pendingBreakMode,
+    nextBreakDurationMinutes: durations[state.pendingBreakMode] || durations.short,
+    ...result,
+  };
+
+  state.latestSurveyResult = surveyResult;
+  state.debugSession.surveys.push(surveyResult);
+}
+
+function startPendingBreak(message) {
+  const nextMode = state.pendingBreakMode || "short";
+  closeSurvey();
+  state.mode = nextMode;
+  resetRemainingSeconds();
+  state.transitionMessage = nextMode === "long"
+    ? `${message} Long break after 4 focus sessions.`
+    : `${message} Short break.`;
+  startTimer();
 }
 
 function canUseWebGazer() {
@@ -819,7 +902,71 @@ function renderDashboard() {
         <button class="round-button" data-action="statsShortcut" aria-label="Open statistics">${icons.chart}</button>
         <button class="round-button" data-action="settings" aria-label="Open settings">${icons.gear}</button>
       </div>
+      ${state.surveyVisible ? renderPostSessionSurvey() : ""}
     </section>
+  `;
+}
+
+function renderPostSessionSurvey() {
+  const focusReady = Boolean(state.surveyDraft.focusLevel);
+  const fatigueReady = Boolean(state.surveyDraft.fatigueLevel);
+  const canSubmit = focusReady && fatigueReady;
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="survey-modal" role="dialog" aria-modal="true" aria-labelledby="surveyTitle">
+        <div class="survey-check" aria-hidden="true">✓</div>
+        <p class="survey-kicker">${state.sessionCount} ${state.sessionCount === 1 ? "session" : "sessions"} completed today</p>
+        <h2 id="surveyTitle">Session complete</h2>
+        <form id="postSessionSurvey" class="survey-form">
+          ${renderSurveyScale(
+            "focusLevel",
+            "How focused were you during this session?",
+            ["Can't focus", "Poor", "Fair", "Good", "Highly focused"]
+          )}
+          ${renderSurveyScale(
+            "fatigueLevel",
+            "How tired do you feel right now?",
+            ["Not tired", "Slightly", "Moderate", "Tired", "Very tired"]
+          )}
+          <label class="survey-comment">
+            <span>Optional note</span>
+            <textarea id="surveyComment" rows="3" maxlength="220" placeholder="Anything you noticed?">${escapeHtml(state.surveyDraft.comment)}</textarea>
+          </label>
+          <div class="survey-actions">
+            <button class="primary-button" type="submit" ${canSubmit ? "" : "disabled"}>Submit</button>
+            <button class="secondary-button" type="button" data-action="skipSurvey">Skip</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderSurveyScale(field, question, labels) {
+  return `
+    <fieldset class="survey-scale">
+      <legend>${question}</legend>
+      <div class="rating-grid" role="radiogroup" aria-label="${question}">
+        ${labels.map((label, index) => {
+          const value = index + 1;
+          const selected = state.surveyDraft[field] === value;
+          return `
+            <button
+              class="rating-option ${selected ? "selected" : ""}"
+              type="button"
+              data-survey-field="${field}"
+              data-survey-value="${value}"
+              role="radio"
+              aria-checked="${selected}"
+            >
+              <strong>${value}</strong>
+              <span>${label}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </fieldset>
   `;
 }
 
@@ -977,6 +1124,7 @@ function renderSoundSettings() {
 
 function renderStatisticsSettings() {
   const hasLog = Boolean(state.latestGazeLog);
+  const latestSurvey = state.latestSurveyResult;
   const diagnostics = state.latestGazeLog
     ? state.latestGazeLog.debug
     : state.gazeSession
@@ -1014,7 +1162,27 @@ function renderStatisticsSettings() {
         </div>
         <button class="toggle ${state.developerDiagnostics ? "on" : ""}" data-action="toggleDiagnostics" aria-label="Toggle developer diagnostics"></button>
       </div>
+      <div class="setting-item">
+        <div class="setting-copy">
+          <h2>Post-session surveys</h2>
+          <p>${state.debugSession.surveys.length} stored in this local debug session.</p>
+        </div>
+      </div>
+      ${latestSurvey ? renderLatestSurveySummary(latestSurvey) : ""}
       ${state.developerDiagnostics ? renderDiagnosticsPanel(diagnostics) : ""}
+    </div>
+  `;
+}
+
+function renderLatestSurveySummary(survey) {
+  const summary = survey.skipped
+    ? "Latest survey was skipped."
+    : `Focus ${survey.focusLevel}/5, fatigue ${survey.fatigueLevel}/5${survey.comment ? `, note: ${escapeHtml(survey.comment)}` : ""}.`;
+
+  return `
+    <div class="diagnostics-panel">
+      <div><span>Latest survey</span><strong>Session ${survey.sessionNumber}</strong></div>
+      <p>${summary}</p>
     </div>
   `;
 }
@@ -1130,6 +1298,21 @@ function attachHandlers() {
   const goalForm = document.querySelector("#goalForm");
   if (goalForm) goalForm.addEventListener("submit", setGoal);
 
+  const surveyForm = document.querySelector("#postSessionSurvey");
+  if (surveyForm) surveyForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitPostSessionSurvey();
+  });
+
+  document.querySelectorAll("[data-survey-field]").forEach((node) => {
+    node.addEventListener("click", () => setSurveyRating(node.dataset.surveyField, node.dataset.surveyValue));
+  });
+
+  const surveyComment = document.querySelector("#surveyComment");
+  if (surveyComment) surveyComment.addEventListener("input", (event) => {
+    state.surveyDraft.comment = event.target.value;
+  });
+
   const goalInput = document.querySelector("#goalInput");
   if (goalInput) goalInput.addEventListener("input", (event) => {
     state.goalDraft = event.target.value;
@@ -1198,6 +1381,7 @@ function handleAction(event) {
     render();
   }
   if (action === "downloadGazeLog") downloadLatestGazeLog();
+  if (action === "skipSurvey") skipPostSessionSurvey();
   if (action === "toggleDiagnostics") {
     state.developerDiagnostics = !state.developerDiagnostics;
     render();
