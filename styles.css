@@ -609,6 +609,11 @@ button:disabled {
   line-height: 1;
 }
 
+.survey-check.baseline {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
 .survey-kicker {
   margin: 0 0 8px;
   color: var(--muted);
@@ -715,6 +720,65 @@ button:disabled {
   justify-content: center;
   gap: 18px;
   flex-wrap: wrap;
+}
+
+.adaptive-card {
+  display: grid;
+  gap: 16px;
+}
+
+.adaptive-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.adaptive-summary div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.adaptive-summary span,
+.override-grid span {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.adaptive-summary strong {
+  white-space: nowrap;
+}
+
+.override-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.override-grid label {
+  display: grid;
+  gap: 8px;
+}
+
+.number-input.compact {
+  width: 100%;
+  min-height: 44px;
+  font-size: 18px;
+}
+
+.adaptive-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.ghost-button.compact {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 14px;
+  font-size: 16px;
 }
 
 .download-log-button {
@@ -1252,5 +1316,9 @@ body.dark .setup-target {
 
   .survey-actions {
     display: grid;
+  }
+
+  .override-grid {
+    grid-template-columns: 1fr;
   }
 }
