@@ -546,9 +546,9 @@ button:disabled {
 }
 
 .dashboard-feedback {
-  width: min(980px, 100%);
+  width: min(1120px, 100%);
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 20px;
   margin: 44px auto 0;
 }
@@ -570,6 +570,174 @@ button:disabled {
 .timer-card p {
   margin: 0;
   line-height: 1.45;
+}
+
+.download-log-button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  color: var(--blue);
+  background: #fff;
+  font-weight: 800;
+}
+
+.download-log-button.compact {
+  width: auto;
+  min-width: 210px;
+  margin-top: 0;
+}
+
+.debug-stack {
+  max-height: 92px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.tracking-setup-screen {
+  width: min(940px, 100%);
+}
+
+.tracking-setup-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.85fr);
+  gap: 26px;
+  align-items: center;
+}
+
+.tracking-checklist {
+  display: grid;
+  gap: 16px;
+}
+
+.tracking-checklist h2,
+.tracking-checklist p {
+  margin: 0;
+}
+
+.tracking-status-badge,
+.tracking-pill {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(91, 127, 255, 0.12);
+  color: var(--blue);
+  font-weight: 800;
+}
+
+.tracking-pill {
+  margin-bottom: 12px;
+}
+
+.tracking-pill span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.tracking-pill.active {
+  color: var(--green);
+  background: rgba(24, 185, 120, 0.13);
+}
+
+.tracking-pill.off {
+  color: var(--muted);
+  background: rgba(102, 119, 149, 0.12);
+}
+
+.setup-target-grid {
+  position: relative;
+  height: 260px;
+  border: 3px solid var(--line);
+  border-radius: 24px;
+  background:
+    linear-gradient(rgba(91, 127, 255, 0.08), rgba(91, 127, 255, 0.08)),
+    #fff;
+}
+
+.setup-target {
+  position: absolute;
+  width: 58px;
+  height: 58px;
+  border: 3px solid var(--blue);
+  border-radius: 50%;
+  color: var(--blue);
+  background: #fff;
+  box-shadow: 0 12px 26px rgba(91, 127, 255, 0.18);
+  font-weight: 900;
+}
+
+.setup-target.done {
+  border-color: var(--green);
+  color: #fff;
+  background: var(--green);
+}
+
+.setup-target.middle-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.setup-target.top-left {
+  top: 22px;
+  left: 22px;
+}
+
+.setup-target.top-right {
+  top: 22px;
+  right: 22px;
+}
+
+.setup-target.bottom-left {
+  bottom: 22px;
+  left: 22px;
+}
+
+.setup-target.bottom-right {
+  right: 22px;
+  bottom: 22px;
+}
+
+.setup-progress {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(91, 127, 255, 0.14);
+}
+
+.setup-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+}
+
+.diagnostics-panel {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 2px dashed var(--line);
+  border-radius: 18px;
+}
+
+.diagnostics-panel div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.diagnostics-panel p {
+  margin: 0;
+  word-break: break-word;
 }
 
 .bottom-controls {
@@ -804,7 +972,8 @@ body.dark .select,
 body.dark .text-input,
 body.dark .number-input,
 body.dark .segmented-setting button,
-body.dark .time-chip {
+body.dark .time-chip,
+body.dark .download-log-button {
   color: var(--text);
   background: #162036;
 }
@@ -814,9 +983,15 @@ body.dark .segmented-setting button.active {
   background: var(--blue);
 }
 
+body.dark .setup-target-grid,
+body.dark .setup-target {
+  background: #162036;
+}
+
 @media (max-width: 980px) {
   .feature-grid,
   .camera-layout,
+  .tracking-setup-panel,
   .dashboard-main,
   .dashboard-feedback {
     grid-template-columns: 1fr;
