@@ -1,6 +1,6 @@
-# Gazodoro
+# GazoTYPO
 
-Gazodoro is an adaptive Pomodoro web application for knowledge workers who perform long, deep reading tasks on a computer.
+GazoTYPO is an adaptive Pomodoro web application for knowledge workers who perform long, deep reading tasks on a computer.
 
 ## Product Goal
 
@@ -20,7 +20,7 @@ Gazodoro helps users maintain focus and manage fatigue during long-form reading 
 - Optional webcam-based engagement detection
 - Engagement status indicator: Stable / Low / Unavailable
 - Post-session self-report survey
-- Adaptive recommendation for next focus/break duration
+- Adaptive recommendation for next focus/break session
 - Settings and privacy controls
 
 ## Tech Stack
