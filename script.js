@@ -1,10 +1,14 @@
 const app = document.querySelector("#app");
 
-const durations = {
+const defaultDurations = {
   focus: 25,
   short: 5,
   long: 15,
 };
+
+const durations = { ...defaultDurations };
+const disengagementThresholdSeconds = 15;
+const sustainedDisengagementThresholdSeconds = 30;
 
 const state = {
   view: "welcome",
@@ -35,6 +39,34 @@ const state = {
   latestGazeLogUrl: "",
   latestGazeLogFileName: "",
   lastGazeSampleAt: 0,
+  debugSession: {
+    baselines: [],
+    surveys: [],
+    adaptiveDecisions: [],
+  },
+  baselineComplete: false,
+  baselineVisible: false,
+  pendingStartAfterBaseline: false,
+  baselineDraft: {
+    readinessLevel: null,
+    fatigueLevel: null,
+  },
+  referenceReadinessScore: null,
+  consecutiveFocusIncreases: 0,
+  latestWebcamMetrics: null,
+  latestAdaptiveDecision: null,
+  overrideDraft: {
+    focus: durations.focus,
+    break: durations.short,
+  },
+  latestSurveyResult: null,
+  surveyVisible: false,
+  pendingBreakMode: "",
+  surveyDraft: {
+    focusLevel: null,
+    fatigueLevel: null,
+    comment: "",
+  },
   goal: "",
   sessionsLeft: 0,
   goalDraft: "",
@@ -182,6 +214,11 @@ function resetRemainingSeconds() {
 }
 
 function startTimer() {
+  if (state.mode === "focus" && !state.baselineComplete) {
+    openBaselineSurvey(true);
+    render();
+    return;
+  }
   if (state.timerId) return;
   state.isRunning = true;
   if (state.mode === "focus") startWebGazerLogging();
@@ -216,6 +253,8 @@ function toggleTimer() {
 function resetTimer() {
   if (state.mode === "focus") finalizeGazeLog("reset");
   stopTimer();
+  closeSurvey();
+  closeBaselineSurvey();
   resetRemainingSeconds();
   state.transitionMessage = `${modeNames[state.mode]} reset to ${durations[state.mode]} minutes.`;
   render();
@@ -228,11 +267,8 @@ function transitionToNextMode() {
     if (state.sessionsLeft > 0) state.sessionsLeft -= 1;
 
     const nextMode = state.sessionCount % 4 === 0 ? "long" : "short";
-    state.mode = nextMode;
-    resetRemainingSeconds();
-    state.transitionMessage = nextMode === "long"
-      ? "Focus complete. Starting a long break after 4 focus sessions."
-      : "Focus complete. Starting a short break.";
+    stopTimer();
+    openPostSessionSurvey(nextMode);
     return;
   }
 
@@ -241,6 +277,443 @@ function transitionToNextMode() {
   resetRemainingSeconds();
   state.transitionMessage = `${completedBreak} complete. Starting the next focus session.`;
   if (state.isRunning) startWebGazerLogging();
+}
+
+function openPostSessionSurvey(nextMode) {
+  state.pendingBreakMode = nextMode;
+  state.surveyVisible = true;
+  state.surveyDraft = {
+    focusLevel: null,
+    fatigueLevel: null,
+    comment: "",
+  };
+  state.transitionMessage = "Focus complete. Share a quick reflection before your break starts.";
+}
+
+function closeSurvey() {
+  state.surveyVisible = false;
+  state.pendingBreakMode = "";
+  state.surveyDraft = {
+    focusLevel: null,
+    fatigueLevel: null,
+    comment: "",
+  };
+}
+
+function openBaselineSurvey(startAfterSubmit = false) {
+  state.baselineVisible = true;
+  state.pendingStartAfterBaseline = startAfterSubmit;
+  state.baselineDraft = {
+    readinessLevel: null,
+    fatigueLevel: null,
+  };
+  state.transitionMessage = "Set your starting point before the first focus session.";
+}
+
+function closeBaselineSurvey() {
+  state.baselineVisible = false;
+  state.pendingStartAfterBaseline = false;
+  state.baselineDraft = {
+    readinessLevel: null,
+    fatigueLevel: null,
+  };
+}
+
+function setSurveyRating(field, value) {
+  state.surveyDraft[field] = Number(value);
+  render();
+}
+
+function setBaselineRating(field, value) {
+  state.baselineDraft[field] = Number(value);
+  render();
+}
+
+function submitBaselineSurvey() {
+  if (!state.baselineDraft.readinessLevel || !state.baselineDraft.fatigueLevel) return;
+
+  const shouldStart = state.pendingStartAfterBaseline || state.mode === "focus";
+  const readinessScore = calculateReadinessScore(
+    state.baselineDraft.readinessLevel,
+    state.baselineDraft.fatigueLevel
+  );
+  const baseline = {
+    id: `baseline-${Date.now()}`,
+    completedAt: new Date().toISOString(),
+    readinessLevel: state.baselineDraft.readinessLevel,
+    fatigueLevel: state.baselineDraft.fatigueLevel,
+    readinessScore,
+  };
+
+  state.referenceReadinessScore = readinessScore;
+  state.baselineComplete = true;
+  state.debugSession.baselines.push(baseline);
+  closeBaselineSurvey();
+  state.transitionMessage = "Baseline saved. Starting your first focus session.";
+
+  if (shouldStart) {
+    startTimer();
+    render();
+  } else {
+    render();
+  }
+}
+
+function submitPostSessionSurvey() {
+  if (!state.surveyDraft.focusLevel || !state.surveyDraft.fatigueLevel) return;
+
+  const survey = storeSurveyResult({
+    skipped: false,
+    focusLevel: state.surveyDraft.focusLevel,
+    fatigueLevel: state.surveyDraft.fatigueLevel,
+    comment: state.surveyDraft.comment.trim(),
+  });
+  applyAdaptiveDecision(survey);
+  startPendingBreak("Survey saved. Starting your break.");
+}
+
+function skipPostSessionSurvey() {
+  const survey = storeSurveyResult({
+    skipped: true,
+    focusLevel: null,
+    fatigueLevel: null,
+    comment: "",
+  });
+  applyAdaptiveDecision(survey);
+  startPendingBreak("Survey skipped. Starting your break.");
+}
+
+function storeSurveyResult(result) {
+  const readinessScore = result.skipped
+    ? null
+    : calculateReadinessScore(result.focusLevel, result.fatigueLevel);
+  const readinessChangePercent = readinessScore == null || state.referenceReadinessScore == null
+    ? null
+    : calculateReadinessChange(readinessScore, state.referenceReadinessScore);
+  const surveyResult = {
+    id: `survey-${Date.now()}`,
+    sessionNumber: state.sessionCount,
+    completedAt: new Date().toISOString(),
+    focusDurationMinutes: durations.focus,
+    nextBreakMode: state.pendingBreakMode,
+    nextBreakDurationMinutes: durations[state.pendingBreakMode] || durations.short,
+    readinessScore,
+    readinessState: readinessScore == null ? "Unavailable" : classifyReadiness(readinessScore),
+    readinessChangePercent,
+    readinessChangeState: readinessChangePercent == null
+      ? "Unavailable"
+      : classifyReadinessChange(readinessChangePercent),
+    fatigueState: result.skipped ? "Unavailable" : classifyFatigue(result.fatigueLevel),
+    ...result,
+  };
+
+  state.latestSurveyResult = surveyResult;
+  state.debugSession.surveys.push(surveyResult);
+  return surveyResult;
+}
+
+function startPendingBreak(message) {
+  const nextMode = state.pendingBreakMode || "short";
+  closeSurvey();
+  state.mode = nextMode;
+  resetRemainingSeconds();
+  state.transitionMessage = nextMode === "long"
+    ? `${message} Long break after 4 focus sessions.`
+    : `${message} Short break.`;
+  startTimer();
+  render();
+}
+
+function setOverrideDraft(field, value) {
+  const numericValue = Math.max(1, Math.min(99, Number(value) || 1));
+  state.overrideDraft[field] = numericValue;
+}
+
+function applyAdaptiveOverride() {
+  if (!state.latestAdaptiveDecision) return;
+  const breakMode = state.latestAdaptiveDecision.breakMode;
+  const customFocus = Math.max(1, Math.min(99, Number(state.overrideDraft.focus) || durations.focus));
+  const customBreak = Math.max(1, Math.min(99, Number(state.overrideDraft.break) || durations[breakMode]));
+  durations.focus = customFocus;
+  durations[breakMode] = customBreak;
+  state.latestAdaptiveDecision.nextFocusDuration = customFocus;
+  state.latestAdaptiveDecision.nextBreakDuration = customBreak;
+  state.latestAdaptiveDecision.focusDelta = customFocus - state.latestAdaptiveDecision.previousFocusDuration;
+  state.latestAdaptiveDecision.breakDelta = customBreak - state.latestAdaptiveDecision.previousBreakDuration;
+  state.latestAdaptiveDecision.reason = "Custom durations were applied by the user.";
+  syncRemainingAfterDurationOverride(breakMode);
+  state.transitionMessage = "Custom adaptive durations applied.";
+  render();
+}
+
+function resetAdaptiveDefaults() {
+  if (!state.latestAdaptiveDecision) return;
+  const breakMode = state.latestAdaptiveDecision.breakMode;
+  durations.focus = defaultDurations.focus;
+  durations[breakMode] = defaultDurations[breakMode];
+  state.latestAdaptiveDecision.nextFocusDuration = durations.focus;
+  state.latestAdaptiveDecision.nextBreakDuration = durations[breakMode];
+  state.latestAdaptiveDecision.focusDelta = durations.focus - state.latestAdaptiveDecision.previousFocusDuration;
+  state.latestAdaptiveDecision.breakDelta = durations[breakMode] - state.latestAdaptiveDecision.previousBreakDuration;
+  state.latestAdaptiveDecision.reason = "Timer durations were reset to defaults by the user.";
+  state.overrideDraft = {
+    focus: durations.focus,
+    break: durations[breakMode],
+  };
+  syncRemainingAfterDurationOverride(breakMode);
+  state.transitionMessage = "Timer durations reset to defaults.";
+  render();
+}
+
+function keepAdaptiveRecommendation() {
+  if (!state.latestAdaptiveDecision) return;
+  state.overrideDraft = {
+    focus: durations.focus,
+    break: durations[state.latestAdaptiveDecision.breakMode],
+  };
+  state.transitionMessage = "Adaptive recommendation kept.";
+  render();
+}
+
+function syncRemainingAfterDurationOverride(breakMode) {
+  if (state.mode === "focus" || state.mode === breakMode) {
+    resetRemainingSeconds();
+  }
+}
+
+function calculateReadinessScore(primaryLevel, fatigueLevel) {
+  return Math.round(((primaryLevel + (6 - fatigueLevel)) / 10) * 100);
+}
+
+function calculateReadinessChange(currentScore, referenceScore) {
+  if (!referenceScore) return null;
+  return Math.round(((currentScore - referenceScore) / referenceScore) * 100);
+}
+
+function classifyReadiness(score) {
+  if (score >= 80) return "High";
+  if (score >= 60) return "Medium";
+  return "Low";
+}
+
+function classifyFatigue(score) {
+  if (score <= 2) return "Low";
+  if (score === 3) return "Moderate";
+  return "High";
+}
+
+function classifyReadinessChange(change) {
+  if (change >= 10) return "Improved";
+  if (change <= -30) return "Significant Decline";
+  if (change <= -15) return "Slight Decline";
+  return "Stable";
+}
+
+function applyAdaptiveDecision(survey) {
+  const decision = buildAdaptiveDecision(survey, state.latestWebcamMetrics);
+  state.latestAdaptiveDecision = decision;
+  state.debugSession.adaptiveDecisions.push(decision);
+
+  durations.focus = decision.nextFocusDuration;
+  durations[decision.breakMode] = decision.nextBreakDuration;
+  state.overrideDraft = {
+    focus: decision.nextFocusDuration,
+    break: decision.nextBreakDuration,
+  };
+
+  if (decision.focusDelta > 0) {
+    state.consecutiveFocusIncreases += 1;
+  } else {
+    state.consecutiveFocusIncreases = 0;
+  }
+
+  if (!survey.skipped && survey.readinessScore != null) {
+    state.referenceReadinessScore = survey.readinessScore;
+  }
+}
+
+function buildAdaptiveDecision(survey, webcamMetrics) {
+  const currentFocusDuration = durations.focus;
+  const breakMode = state.pendingBreakMode || "short";
+  const currentBreakDuration = durations[breakMode] || durations.short;
+  const webcamAvailable = Boolean(webcamMetrics && webcamMetrics.state !== "Unavailable");
+  const surveyAvailable = Boolean(survey && !survey.skipped);
+  const rule = chooseAdaptiveRule(survey, webcamMetrics, surveyAvailable, webcamAvailable);
+
+  let focusDelta = Math.max(-5, Math.min(5, rule.focusDelta));
+  let breakDelta = Math.max(0, Math.min(5, rule.breakDelta));
+
+  if (focusDelta > 0 && state.consecutiveFocusIncreases >= 3) {
+    focusDelta = 0;
+    rule.reason = `${rule.reason} Focus stays the same because it already increased three cycles in a row.`;
+  }
+
+  const nextFocusDuration = Math.max(10, currentFocusDuration + focusDelta);
+  const nextBreakDuration = Math.max(5, currentBreakDuration + breakDelta);
+
+  return {
+    id: `adaptive-${Date.now()}`,
+    createdAt: new Date().toISOString(),
+    sessionNumber: state.sessionCount,
+    sourceDataAvailability: surveyAvailable && webcamAvailable
+      ? "full"
+      : surveyAvailable
+        ? "survey-only"
+        : webcamAvailable
+          ? "webcam-only"
+          : "none",
+    ruleKey: rule.key,
+    reason: rule.reason,
+    breakMode,
+    previousFocusDuration: currentFocusDuration,
+    previousBreakDuration: currentBreakDuration,
+    nextFocusDuration,
+    nextBreakDuration,
+    focusDelta: nextFocusDuration - currentFocusDuration,
+    breakDelta: nextBreakDuration - currentBreakDuration,
+    surveySnapshot: survey,
+    webcamSnapshot: webcamMetrics || createUnavailableWebcamMetrics(),
+  };
+}
+
+function chooseAdaptiveRule(survey, webcamMetrics, surveyAvailable, webcamAvailable) {
+  const webcamState = webcamAvailable ? webcamMetrics.state : "Unavailable";
+  const lowEngagementEvent = Boolean(webcamMetrics && webcamMetrics.lowEngagementEvent);
+
+  if (surveyAvailable && webcamAvailable) {
+    if (survey.fatigueLevel >= 4 && (webcamState === "High" || webcamState === "Medium")) {
+      return { key: "fatigue-engaged", focusDelta: 0, breakDelta: 5, reason: "Fatigue was high while engagement stayed visible, so recovery time increased." };
+    }
+    if (survey.fatigueLevel >= 4 && webcamState === "Low") {
+      return { key: "fatigue-low-engagement", focusDelta: -5, breakDelta: 5, reason: "Fatigue was high and visual engagement was low." };
+    }
+    if (survey.readinessChangePercent != null && survey.readinessChangePercent <= -30) {
+      return { key: "significant-readiness-decline", focusDelta: -5, breakDelta: 5, reason: "Readiness dropped significantly compared with the previous reference." };
+    }
+    if (lowEngagementEvent) {
+      return { key: "sustained-low-engagement", focusDelta: -5, breakDelta: 3, reason: "You looked away from the screen for at least 30 continuous seconds." };
+    }
+    if (webcamState === "High" && survey.readinessState === "High" && survey.fatigueLevel <= 2) {
+      return { key: "high-engagement-high-readiness", focusDelta: 5, breakDelta: 0, reason: "Engagement and readiness were both high with low fatigue." };
+    }
+    if (webcamState === "High" && survey.readinessChangePercent != null && survey.readinessChangePercent >= 10 && survey.fatigueLevel <= 3) {
+      return { key: "improved-readiness-high-engagement", focusDelta: 5, breakDelta: 0, reason: "Readiness improved while engagement remained high." };
+    }
+    if (survey.readinessChangeState === "Slight Decline") {
+      return { key: "slight-readiness-decline", focusDelta: 0, breakDelta: 3, reason: "Readiness declined slightly, so recovery time increased." };
+    }
+    if (webcamState === "Medium" && survey.readinessChangeState === "Stable") {
+      return { key: "stable-medium-engagement", focusDelta: 0, breakDelta: 0, reason: "Your session looked stable." };
+    }
+    return { key: "no-strong-signal", focusDelta: 0, breakDelta: 0, reason: "No strong adaptive signal was detected." };
+  }
+
+  if (surveyAvailable) {
+    if (survey.fatigueLevel >= 4) {
+      return { key: "survey-fatigue", focusDelta: 0, breakDelta: 5, reason: "Fatigue was high, so recovery time increased." };
+    }
+    if (survey.readinessChangePercent != null && survey.readinessChangePercent <= -30) {
+      return { key: "survey-significant-decline", focusDelta: -5, breakDelta: 5, reason: "Readiness dropped significantly." };
+    }
+    if (survey.readinessChangePercent != null && survey.readinessChangePercent <= -15) {
+      return { key: "survey-slight-decline", focusDelta: 0, breakDelta: 3, reason: "Readiness declined slightly." };
+    }
+    if (survey.readinessChangePercent != null && survey.readinessChangePercent >= 10 && survey.fatigueLevel <= 2) {
+      return { key: "survey-improved-readiness", focusDelta: 5, breakDelta: 0, reason: "Readiness improved and fatigue was low." };
+    }
+    return { key: "survey-stable", focusDelta: 0, breakDelta: 0, reason: "Survey feedback looked stable." };
+  }
+
+  if (webcamAvailable) {
+    if (lowEngagementEvent) {
+      return { key: "webcam-sustained-low", focusDelta: 0, breakDelta: 3, reason: "Webcam signals suggested sustained disengagement. Focus duration was not increased without survey feedback." };
+    }
+    if (webcamState === "Low") {
+      return { key: "webcam-low", focusDelta: 0, breakDelta: 3, reason: "Webcam signals suggested low engagement. Focus duration was not increased without survey feedback." };
+    }
+    return { key: "webcam-stable", focusDelta: 0, breakDelta: 0, reason: "Webcam signals looked stable, but survey feedback was skipped." };
+  }
+
+  return { key: "no-data", focusDelta: 0, breakDelta: 0, reason: "No reliable adaptive input was available." };
+}
+
+function createUnavailableWebcamMetrics() {
+  return {
+    state: "Unavailable",
+    score: null,
+    screenPresenceRatio: null,
+    disengagementCount: 0,
+    sustainedDisengagementSeconds: 0,
+    lowEngagementEvent: false,
+    sampleCount: 0,
+    validSampleCount: 0,
+    invalidSampleCount: 0,
+  };
+}
+
+function calculateWebcamMetrics(log) {
+  if (!log || !Array.isArray(log.samples) || log.samples.length < 5) {
+    return createUnavailableWebcamMetrics();
+  }
+
+  const samples = log.samples;
+  const presentSamples = samples.filter((sample) => sample.screenPresent).length;
+  const screenPresenceRatio = Math.round((presentSamples / samples.length) * 100);
+  let disengagementCount = 0;
+  let currentDisengagementSeconds = 0;
+  let sustainedDisengagementSeconds = 0;
+
+  samples.forEach((sample) => {
+    if (sample.screenPresent) {
+      if (currentDisengagementSeconds >= disengagementThresholdSeconds) {
+        disengagementCount += 1;
+      }
+      sustainedDisengagementSeconds = Math.max(sustainedDisengagementSeconds, currentDisengagementSeconds);
+      currentDisengagementSeconds = 0;
+      return;
+    }
+
+    currentDisengagementSeconds += 1;
+  });
+
+  if (currentDisengagementSeconds >= disengagementThresholdSeconds) {
+    disengagementCount += 1;
+  }
+  sustainedDisengagementSeconds = Math.max(sustainedDisengagementSeconds, currentDisengagementSeconds);
+
+  const disengagementPenaltyScore = Math.max(0, 100 - (disengagementCount * 10));
+  const score = Math.round((screenPresenceRatio * 0.8) + (disengagementPenaltyScore * 0.2));
+
+  return {
+    state: classifyWebcamEngagement(score),
+    score,
+    screenPresenceRatio,
+    disengagementPenaltyScore,
+    disengagementCount,
+    sustainedDisengagementSeconds,
+    lowEngagementEvent: sustainedDisengagementSeconds >= sustainedDisengagementThresholdSeconds,
+    sampleCount: samples.length,
+    validSampleCount: log.debug.validSampleCount,
+    invalidSampleCount: log.debug.invalidSampleCount,
+  };
+}
+
+function classifyWebcamEngagement(score) {
+  if (score >= 85) return "High";
+  if (score >= 65) return "Medium";
+  return "Low";
+}
+
+function isScreenPresent(data) {
+  if (!data || !Number.isFinite(data.x) || !Number.isFinite(data.y)) return false;
+  const width = window.innerWidth || document.documentElement.clientWidth || 0;
+  const height = window.innerHeight || document.documentElement.clientHeight || 0;
+  const marginX = width * 0.08;
+  const marginY = height * 0.08;
+  return data.x >= -marginX
+    && data.x <= width + marginX
+    && data.y >= -marginY
+    && data.y <= height + marginY;
 }
 
 function canUseWebGazer() {
@@ -309,6 +782,7 @@ function startWebGazerLogging() {
       state.lastGazeSampleAt = now;
 
       const valid = Boolean(data && Number.isFinite(data.x) && Number.isFinite(data.y));
+      const screenPresent = isScreenPresent(data);
       if (valid) {
         state.gazeSession.validSampleCount += 1;
         state.webgazerStatus = "Tracking active. Keep your face centered.";
@@ -322,6 +796,9 @@ function startWebGazerLogging() {
         x: valid ? Math.round(data.x) : null,
         y: valid ? Math.round(data.y) : null,
         valid,
+        screenPresent,
+        viewportWidth: window.innerWidth || null,
+        viewportHeight: window.innerHeight || null,
       });
     });
 
@@ -401,6 +878,9 @@ function stopWebGazerLogging(reason = "stopped") {
 function finalizeGazeLog(reason) {
   if (!state.gazeSession) {
     stopWebGazerLogging(reason);
+    if (reason === "focus-complete") {
+      state.latestWebcamMetrics = createUnavailableWebcamMetrics();
+    }
     return;
   }
 
@@ -435,9 +915,12 @@ function finalizeGazeLog(reason) {
     },
     samples: state.gazeSession.samples,
   };
+  const metrics = calculateWebcamMetrics(log);
+  log.metrics = metrics;
 
   stopWebGazerLogging(reason);
   state.latestGazeLog = log;
+  state.latestWebcamMetrics = reason === "focus-complete" ? metrics : createUnavailableWebcamMetrics();
   state.latestGazeLogFileName = `gazodoro-session-log-${new Date(endedAt).toISOString().replace(/[:.]/g, "-")}.csv`;
   state.gazeSession = null;
 
@@ -795,7 +1278,7 @@ function renderDashboard() {
       <div class="dashboard-feedback">
         <article class="timer-card">
           <h3>Engagement status</h3>
-          <p>${state.webcamEnabled ? "Placeholder: ready for future gaze signal." : "Unavailable in Standard Mode."}</p>
+          <p>${renderEngagementStatusText()}</p>
         </article>
         <article class="timer-card">
           <h3>Privacy</h3>
@@ -810,6 +1293,7 @@ function renderDashboard() {
           <div class="tracking-pill ${trackingStateClass}"><span></span>${trackingTitle}</div>
           <p>${state.webcamEnabled ? state.webgazerStatus : "Webcam detection is off."}</p>
         </article>
+        ${state.latestAdaptiveDecision ? renderAdaptiveDecisionCard() : ""}
       </div>
       <div class="bottom-controls">
         <button class="round-button" data-action="resetShell" aria-label="Reset timer">${icons.reset}</button>
@@ -819,7 +1303,168 @@ function renderDashboard() {
         <button class="round-button" data-action="statsShortcut" aria-label="Open statistics">${icons.chart}</button>
         <button class="round-button" data-action="settings" aria-label="Open settings">${icons.gear}</button>
       </div>
+      ${state.surveyVisible ? renderPostSessionSurvey() : ""}
+      ${state.baselineVisible ? renderBaselineSurvey() : ""}
     </section>
+  `;
+}
+
+function renderEngagementStatusText() {
+  const metrics = state.latestWebcamMetrics;
+  if (!state.webcamEnabled) return "Unavailable in Standard Mode.";
+  if (!metrics || metrics.state === "Unavailable") return "Waiting for a completed focus session.";
+  return `${metrics.state} engagement, ${metrics.screenPresenceRatio}% screen presence.`;
+}
+
+function renderPostSessionSurvey() {
+  const focusReady = Boolean(state.surveyDraft.focusLevel);
+  const fatigueReady = Boolean(state.surveyDraft.fatigueLevel);
+  const canSubmit = focusReady && fatigueReady;
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="survey-modal" role="dialog" aria-modal="true" aria-labelledby="surveyTitle">
+        <div class="survey-check" aria-hidden="true">OK</div>
+        <p class="survey-kicker">${state.sessionCount} ${state.sessionCount === 1 ? "session" : "sessions"} completed today</p>
+        <h2 id="surveyTitle">Session complete</h2>
+        <form id="postSessionSurvey" class="survey-form">
+          ${renderSurveyScale(
+            "focusLevel",
+            "How focused were you during this session?",
+            ["Can't focus", "Poor", "Fair", "Good", "Highly focused"]
+          )}
+          ${renderSurveyScale(
+            "fatigueLevel",
+            "How tired do you feel right now?",
+            ["Not tired", "Slightly", "Moderate", "Tired", "Very tired"]
+          )}
+          <label class="survey-comment">
+            <span>Optional note</span>
+            <textarea id="surveyComment" rows="3" maxlength="220" placeholder="Anything you noticed?">${escapeHtml(state.surveyDraft.comment)}</textarea>
+          </label>
+          <div class="survey-actions">
+            <button class="primary-button" type="submit" ${canSubmit ? "" : "disabled"}>Submit</button>
+            <button class="secondary-button" type="button" data-action="skipSurvey">Skip</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderBaselineSurvey() {
+  const readinessReady = Boolean(state.baselineDraft.readinessLevel);
+  const fatigueReady = Boolean(state.baselineDraft.fatigueLevel);
+  const canSubmit = readinessReady && fatigueReady;
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="survey-modal" role="dialog" aria-modal="true" aria-labelledby="baselineTitle">
+        <div class="survey-check baseline" aria-hidden="true">1</div>
+        <p class="survey-kicker">Required before your first focus session</p>
+        <h2 id="baselineTitle">Set your baseline</h2>
+        <form id="baselineSurvey" class="survey-form">
+          ${renderBaselineScale(
+            "readinessLevel",
+            "How ready do you feel to start focused reading right now?",
+            ["Not ready", "Low", "Okay", "Ready", "Very ready"]
+          )}
+          ${renderBaselineScale(
+            "fatigueLevel",
+            "How mentally or visually tired do you feel right now?",
+            ["Not tired", "Slightly", "Moderate", "Tired", "Very tired"]
+          )}
+          <div class="survey-actions">
+            <button class="primary-button" type="submit" ${canSubmit ? "" : "disabled"}>Start focus</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderSurveyScale(field, question, labels) {
+  return `
+    <fieldset class="survey-scale">
+      <legend>${question}</legend>
+      <div class="rating-grid" role="radiogroup" aria-label="${question}">
+        ${labels.map((label, index) => {
+          const value = index + 1;
+          const selected = state.surveyDraft[field] === value;
+          return `
+            <button
+              class="rating-option ${selected ? "selected" : ""}"
+              type="button"
+              data-survey-field="${field}"
+              data-survey-value="${value}"
+              role="radio"
+              aria-checked="${selected}"
+            >
+              <strong>${value}</strong>
+              <span>${label}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </fieldset>
+  `;
+}
+
+function renderBaselineScale(field, question, labels) {
+  return `
+    <fieldset class="survey-scale">
+      <legend>${question}</legend>
+      <div class="rating-grid" role="radiogroup" aria-label="${question}">
+        ${labels.map((label, index) => {
+          const value = index + 1;
+          const selected = state.baselineDraft[field] === value;
+          return `
+            <button
+              class="rating-option ${selected ? "selected" : ""}"
+              type="button"
+              data-baseline-field="${field}"
+              data-baseline-value="${value}"
+              role="radio"
+              aria-checked="${selected}"
+            >
+              <strong>${value}</strong>
+              <span>${label}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </fieldset>
+  `;
+}
+
+function renderAdaptiveDecisionCard() {
+  const decision = state.latestAdaptiveDecision;
+  const breakLabel = modeNames[decision.breakMode] || "Break";
+
+  return `
+    <article class="timer-card adaptive-card">
+      <h3>Adaptive result</h3>
+      <p>${escapeHtml(decision.reason)}</p>
+      <div class="adaptive-summary">
+        <div><span>Next focus</span><strong>${decision.previousFocusDuration} -> ${decision.nextFocusDuration}m</strong></div>
+        <div><span>${breakLabel}</span><strong>${decision.previousBreakDuration} -> ${decision.nextBreakDuration}m</strong></div>
+      </div>
+      <div class="override-grid">
+        <label>
+          <span>Focus</span>
+          <input id="overrideFocus" class="number-input compact" type="number" min="1" max="99" value="${state.overrideDraft.focus}" />
+        </label>
+        <label>
+          <span>Break</span>
+          <input id="overrideBreak" class="number-input compact" type="number" min="1" max="99" value="${state.overrideDraft.break}" />
+        </label>
+      </div>
+      <div class="adaptive-actions">
+        <button class="download-log-button compact" data-action="applyAdaptiveOverride">Apply custom</button>
+        <button class="download-log-button compact" data-action="resetAdaptiveDefaults">Reset defaults</button>
+        <button class="ghost-button compact" data-action="keepAdaptiveRecommendation">Keep</button>
+      </div>
+    </article>
   `;
 }
 
@@ -977,6 +1622,7 @@ function renderSoundSettings() {
 
 function renderStatisticsSettings() {
   const hasLog = Boolean(state.latestGazeLog);
+  const latestSurvey = state.latestSurveyResult;
   const diagnostics = state.latestGazeLog
     ? state.latestGazeLog.debug
     : state.gazeSession
@@ -1014,7 +1660,27 @@ function renderStatisticsSettings() {
         </div>
         <button class="toggle ${state.developerDiagnostics ? "on" : ""}" data-action="toggleDiagnostics" aria-label="Toggle developer diagnostics"></button>
       </div>
+      <div class="setting-item">
+        <div class="setting-copy">
+          <h2>Post-session surveys</h2>
+          <p>${state.debugSession.surveys.length} stored in this local debug session.</p>
+        </div>
+      </div>
+      ${latestSurvey ? renderLatestSurveySummary(latestSurvey) : ""}
       ${state.developerDiagnostics ? renderDiagnosticsPanel(diagnostics) : ""}
+    </div>
+  `;
+}
+
+function renderLatestSurveySummary(survey) {
+  const summary = survey.skipped
+    ? "Latest survey was skipped."
+    : `Focus ${survey.focusLevel}/5, fatigue ${survey.fatigueLevel}/5${survey.comment ? `, note: ${escapeHtml(survey.comment)}` : ""}.`;
+
+  return `
+    <div class="diagnostics-panel">
+      <div><span>Latest survey</span><strong>Session ${survey.sessionNumber}</strong></div>
+      <p>${summary}</p>
     </div>
   `;
 }
@@ -1130,6 +1796,41 @@ function attachHandlers() {
   const goalForm = document.querySelector("#goalForm");
   if (goalForm) goalForm.addEventListener("submit", setGoal);
 
+  const surveyForm = document.querySelector("#postSessionSurvey");
+  if (surveyForm) surveyForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitPostSessionSurvey();
+  });
+
+  const baselineForm = document.querySelector("#baselineSurvey");
+  if (baselineForm) baselineForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitBaselineSurvey();
+  });
+
+  document.querySelectorAll("[data-survey-field]").forEach((node) => {
+    node.addEventListener("click", () => setSurveyRating(node.dataset.surveyField, node.dataset.surveyValue));
+  });
+
+  document.querySelectorAll("[data-baseline-field]").forEach((node) => {
+    node.addEventListener("click", () => setBaselineRating(node.dataset.baselineField, node.dataset.baselineValue));
+  });
+
+  const surveyComment = document.querySelector("#surveyComment");
+  if (surveyComment) surveyComment.addEventListener("input", (event) => {
+    state.surveyDraft.comment = event.target.value;
+  });
+
+  const overrideFocus = document.querySelector("#overrideFocus");
+  if (overrideFocus) overrideFocus.addEventListener("input", (event) => {
+    setOverrideDraft("focus", event.target.value);
+  });
+
+  const overrideBreak = document.querySelector("#overrideBreak");
+  if (overrideBreak) overrideBreak.addEventListener("input", (event) => {
+    setOverrideDraft("break", event.target.value);
+  });
+
   const goalInput = document.querySelector("#goalInput");
   if (goalInput) goalInput.addEventListener("input", (event) => {
     state.goalDraft = event.target.value;
@@ -1198,6 +1899,10 @@ function handleAction(event) {
     render();
   }
   if (action === "downloadGazeLog") downloadLatestGazeLog();
+  if (action === "skipSurvey") skipPostSessionSurvey();
+  if (action === "applyAdaptiveOverride") applyAdaptiveOverride();
+  if (action === "resetAdaptiveDefaults") resetAdaptiveDefaults();
+  if (action === "keepAdaptiveRecommendation") keepAdaptiveRecommendation();
   if (action === "toggleDiagnostics") {
     state.developerDiagnostics = !state.developerDiagnostics;
     render();

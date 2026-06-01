@@ -1,6 +1,6 @@
-# Gazodoro
+# GazoTYPO
 
-## Project Summary
+GazoTYPO is an adaptive Pomodoro web application for knowledge workers who perform long, deep reading tasks on a computer.
 
 Gazodoro is an adaptive Pomodoro web prototype for knowledge workers who do long, focused reading on a computer.
 
@@ -20,7 +20,14 @@ The app combines a simple focus/break timer, optional webcam-based engagement si
 
 ## How To Run Locally
 
-This is a static HTML/CSS/JavaScript prototype.
+- Onboarding and optional webcam permission setup
+- Core Pomodoro timer: start, pause/resume, reset, stop
+- Automatic focus/break session transition
+- Optional webcam-based engagement detection
+- Engagement status indicator: Stable / Low / Unavailable
+- Post-session self-report survey
+- Adaptive recommendation for next focus/break session
+- Settings and privacy controls
 
 From the project root, run:
 
@@ -56,9 +63,11 @@ Privacy rules:
 
 ## Branch Workflow
 
-- `main`: stable project baseline and documentation.
-- `feature/post-session-survey`: post-session survey UI and local survey storage.
-- `feature/adaptive-logic`: baseline survey, webcam metrics, adaptive decision rules, and override behavior.
+- `main`: stable demo/milestone branch
+- `develop`: integration branch
+- `feature/*`: individual feature branches
+- `docs/*`: documentation branches
+- `hotfix/*`: bug fix branches
 
 Recommended workflow:
 

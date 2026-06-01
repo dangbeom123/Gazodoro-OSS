@@ -572,6 +572,215 @@ button:disabled {
   line-height: 1.45;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.48);
+  backdrop-filter: blur(5px);
+}
+
+.survey-modal {
+  width: min(980px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: clamp(28px, 4vw, 54px);
+  border: 2px solid var(--line-soft);
+  border-radius: 28px;
+  background: var(--surface);
+  box-shadow: 0 30px 70px rgba(17, 24, 39, 0.24);
+  text-align: center;
+}
+
+.survey-check {
+  width: 76px;
+  height: 76px;
+  display: inline-grid;
+  place-items: center;
+  margin-bottom: 16px;
+  border: 7px solid var(--green);
+  border-radius: 50%;
+  color: var(--green);
+  font-size: 46px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.survey-check.baseline {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.survey-kicker {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.survey-modal h2 {
+  margin: 0 0 26px;
+  font-size: clamp(32px, 4vw, 48px);
+  line-height: 1.15;
+}
+
+.survey-form {
+  display: grid;
+  gap: 24px;
+}
+
+.survey-scale {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.survey-scale legend {
+  margin-bottom: 6px;
+  color: var(--text);
+  font-size: 21px;
+  font-weight: 800;
+}
+
+.rating-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.rating-option {
+  min-height: 116px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 16px 10px;
+  border: 3px solid var(--line);
+  border-radius: 20px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 10px 20px rgba(29, 51, 88, 0.06);
+}
+
+.rating-option strong {
+  font-size: 38px;
+  line-height: 1;
+}
+
+.rating-option span {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.rating-option.selected {
+  color: #fff;
+  border-color: var(--blue);
+  background: var(--blue);
+  box-shadow: 0 16px 28px rgba(71, 120, 255, 0.24);
+}
+
+.rating-option.selected span {
+  color: #fff;
+}
+
+.survey-comment {
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+
+.survey-comment span {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.survey-comment textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 92px;
+  border: 3px solid var(--line);
+  border-radius: 18px;
+  padding: 16px 18px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  line-height: 1.4;
+}
+
+.survey-actions {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.adaptive-card {
+  display: grid;
+  gap: 16px;
+}
+
+.adaptive-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.adaptive-summary div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.adaptive-summary span,
+.override-grid span {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.adaptive-summary strong {
+  white-space: nowrap;
+}
+
+.override-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.override-grid label {
+  display: grid;
+  gap: 8px;
+}
+
+.number-input.compact {
+  width: 100%;
+  min-height: 44px;
+  font-size: 18px;
+}
+
+.adaptive-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.ghost-button.compact {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 14px;
+  font-size: 16px;
+}
+
 .download-log-button {
   width: 100%;
   min-height: 44px;
@@ -973,7 +1182,9 @@ body.dark .text-input,
 body.dark .number-input,
 body.dark .segmented-setting button,
 body.dark .time-chip,
-body.dark .download-log-button {
+body.dark .download-log-button,
+body.dark .rating-option,
+body.dark .survey-comment textarea {
   color: var(--text);
   background: #162036;
 }
@@ -1018,6 +1229,12 @@ body.dark .setup-target {
   .dashboard-main {
     margin-top: 56px;
     gap: 42px;
+  }
+
+  .rating-grid {
+    grid-template-columns: repeat(5, minmax(88px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 6px;
   }
 
   .bottom-controls,
@@ -1075,5 +1292,33 @@ body.dark .setup-target {
 
   .settings-header {
     gap: 14px;
+  }
+
+  .survey-modal {
+    padding: 24px 18px;
+  }
+
+  .rating-grid {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .rating-option {
+    min-height: 76px;
+    grid-template-columns: 48px 1fr;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .rating-option strong {
+    font-size: 30px;
+  }
+
+  .survey-actions {
+    display: grid;
+  }
+
+  .override-grid {
+    grid-template-columns: 1fr;
   }
 }
