@@ -69,13 +69,6 @@ Privacy rules:
 - `docs/*`: documentation branches
 - `hotfix/*`: bug fix branches
 
-Recommended workflow:
-
-1. Create feature branches from the latest `main`.
-2. Keep each branch scoped to one feature or document update.
-3. Test locally before merging.
-4. Avoid mixing unrelated UI, logic, and documentation changes in one branch.
-
 ## Known Limitations
 
 - Gazodoro is a prototype, not a production-ready productivity tool.
@@ -85,12 +78,6 @@ Recommended workflow:
 - Data is currently stored in memory only; refreshing the page clears local session results.
 - There is no backend, account system, or cloud sync.
 - WebGazer requires a local server and may not work correctly from `file://` or some `127.0.0.1` setups.
-
-## Team Members / Roles
-
-- Hai Dang: product direction, requirements, and acceptance decisions
-- Lam: adaptive Pomodoro behavior, user scenario, and feature refinement
-- Chris: documentation refinement, survey wording, and adaptive logic clarification
 
 ## Screenshots
 
