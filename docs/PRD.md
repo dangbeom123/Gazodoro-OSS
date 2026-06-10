@@ -59,8 +59,8 @@ Specific goals:
 
 * To help users maintain sustained attention and reading flow during long-form reading tasks  
 * To reduce cognitive effort required to manually manage Pomodoro sessions and decide when to take breaks  
-* To improve usability and engagement by aligning work and break intervals with users’ session-by-session engagement patterns  
-* To provide adaptive support and personalized feedback based on user engagement and post-focus self-report
+* To improve usability and engagement by aligning work and break intervals with users’ real-time engagement patterns  
+* To provide adaptive support and personalized feedback based on user engagement and post-session self-report
 
 ## **5\. Target Users**
 
@@ -112,30 +112,30 @@ Lam
 
 **Needs:**
 
-* A timer that detects when he appears visually engaged and adjusts the **next** focus/break cycle without interrupting the current reading flow.  
+* A timer that detects when he is actually focused and **extends the session slightly** and stop at the **on-the-edge of decreasing** .  
 * Automated break reminders that don't require him to stop and click buttons constantly.
 
 **Scenario:**  
 Lam is reading a **20-page research paper** for his thesis. Lam is having an overview of this topic for his graduation thesis, he used NotebookLM to summerize all related papers and he noticed one paper should be read carefully for his research paper/thesis. 
 
-He starts the adaptive Pomodoro timer. During the focus session, the system estimates whether he appears visually engaged with the screen. When the focus session ends, Lam answers a short focus/fatigue survey. Gazodoro combines webcam engagement and survey readiness, then automatically adjusts the next focus and break durations while still allowing Lam to override the recommendation.
+He starts the adaptive Pomodoro timer. After 25 minutes, the system detects his gaze is still steady on the screen (high engagement) and silently extends the session by 10 minutes to preserve his flow. When he begins to fidget or look away frequently, the app triggers a "refresher break."
 
 **8\. User Journey Map**
 
 | Stage | User Action | User Thought / Feeling | Pain Point | Opportunity |
 | ----- | ----- | ----- | ----- | ----- |
 | Preparation | Opens reading material and starts the timer | "I hope I can finish this chapter without getting distracted." | Anxiety about the volume of work. | Simple, clean UI to reduce initial cognitive load.  |
-| Deep Work | Reads intensely until the timer reaches the planned focus duration.  | "I'm finally in the zone. I don't want to manage the timer manually." | Fixed timers do not adapt to his actual state across sessions. | System records engagement signals without interrupting the current focus session. |
-| Fatigue | Starts rereading the same paragraph; eyes wandering.  | "I'm getting tired, but I should push through a bit more."  | User fails to recognize gradual fatigue. | System combines low engagement events and self-report to adjust the next cycle. |
-| Break / Prompt | Completes a short focus/fatigue survey after the focus session | "I didn't realize how tired my eyes were until the app asked me." | Users often ignore gradual fatigue until it significantly impacts work quality.  | Use self-report to calibrate the next focus and break durations, preventing overexertion.  |
+| Deep Work | Reads intensely until the timer reaches 25 mins.  | "I'm finally in the zone. I don't want to stop now." | A fixed timers would force a break, breaking the "flow." | System detects user is focused and keeps the timer running. |
+| Fatigue | Starts rereading the same paragraph; eyes wandering.  | "I'm getting tired, but I should push through a bit more."  | User fails to recognize their own fatigue. | System detects unfocused user (low gaze stability) and triggers a break session. |
+| Break / Prompt | Completes a short survey on fatigue and focus levels after a study block | "I didn't realize how tired my eyes were until the app asked me." | Users often ignore gradual fatigue until it significantly impacts their work quality.  | Use the self-report to calibrate future session lengths, preventing overexertion.  |
 
 ## **9\. Scope**
 
 ### **In Scope**
 
 * Core Pomodoro timer (start, pause/resume, reset, break transition, session management)  
-* Adaptive timer adjustment based on user engagement signals and post-focus feedback  
-* Basic webcam-based engagement detection (e.g., screen presence, sustained disengagement)  
+* Adaptive timer adjustment based on user engagement signals and post-session feedback  
+* Basic webcam-based engagement detection (e.g., screen presence, gaze stability)  
 * Post-session self-report survey for focus and fatigue  
 * Minimal and user-friendly interface optimized for deep reading tasks
 
@@ -152,10 +152,10 @@ He starts the adaptive Pomodoro timer. During the focus session, the system esti
 ### **Feature 1: Adaptive Pomodoro Timer**
 
 **Description:**  
-The system dynamically adjusts the **next** focus and break durations based on estimated user engagement and post-focus feedback.
+The system dynamically adjusts focus and break durations based on estimated user engagement and post-session feedback.
 
 **Purpose:**  
-To address the mismatch between fixed Pomodoro intervals and users’ actual engagement and fatigue levels, helping maintain reading flow and reduce ineffective work periods.
+To address the mismatch between fixed Pomodoro intervals and users’ actual attention and fatigue levels, helping maintain reading flow and reduce ineffective work periods.
 
 **Priority:**  
 High
@@ -163,27 +163,34 @@ High
 ### **Feature 2: Webcam-based Engagement Detection**
 
 **Description:**  
-The system uses webcam input to detect basic engagement signals such as screen presence and sustained disengagement, providing a lightweight estimate of visual engagement.
+The system uses webcam input to detect basic engagement signals such as screen presence and gaze stability, providing real-time estimation of user engagement.
 
 **Purpose:**  
-To provide contextual input for next-session adaptation without requiring users to constantly manage the timer manually.
+To provide contextual input for adaptive behavior, allowing the system to respond to changes in user attention without requiring manual input.
 
 **Priority:**  
 High
 
-Webcam-based engagement detection is optional. The system should not store raw webcam video or images.
+**Should have thought about the privacy** 
 
-### **Feature 3: Post-focus Feedback (Self-report Survey)**
+### **Feature 3: Post-session Feedback (Self-report Survey)**
 
 **Description:**  
-After each focus session, users provide simple feedback on their focus level and fatigue. A baseline survey before the first focus session creates the first readiness reference.
+After each session, users provide simple feedback on their focus level and fatigue.
 
 | Question Topic | Question | Purpose |
 | :---- | :---- | :---- |
-| Focus Depth | “How focused were you during this session?” | Cross-check against webcam engagement information gathered during the focus session.  |
+| Focus Depth | “How focused were you during this session?” | Cross-check against gaze stability information gathered from webcam analysis.  |
 | Fatigue | “How tired do you feel right now?” | Information about user fatigue that is tough to determine through webcam alone. |
+| Rest & Relaxation | “How long a break do you need right now?” | Helps system adjust break time to avoid user overextension. |
 
-User can answer questions on a **1 to 5** scale. The user may also skip the post-focus survey; if skipped, the system uses available webcam data only and avoids strong adaptation.
+(Maybe the third question is redundant, we can get similar information about the user from the second question)
+
+User can answer questions in a scale **from 1 to 5**. If the user doesn’t answer the questions **within 1 minute** (or 30 seconds?) the break begins automatically without user feedback.
+
+Suggestion:
+
+Scoring question (from 1 \>10 I guess) (maybe change the scale to be from 1 to 5? A scale with lower accuracy and less options will create less of a cognitive load to first-time users especially)
 
 **Purpose:**  
 To complement system-based estimation and improve adaptation accuracy while encouraging user reflection on their work state.
@@ -198,11 +205,11 @@ Medium
 | FR-01 | The system shall allow users to start, pause, resume, and reset a Pomodoro timer. | High |
 | FR-02 | The system shall automatically transition between focus sessions and break sessions. | High |
 | FR-03 | The system shall display the remaining time clearly during each session. | High |
-| FR-04 | The system shall collect basic engagement signals using the user’s webcam (e.g., screen presence and sustained disengagement). | High |
-| FR-05 | The system shall adjust the next focus and break durations based on webcam engagement and post-focus feedback. | High |
-| FR-06 | The system shall prompt users to complete a short survey after each focus session (e.g., focus level, fatigue level). | Medium |
-| FR-07 | The system shall provide a clear explanation for adaptive changes based on available engagement and survey signals. | Medium |
-| FR-08 | The system shall auto-apply adaptive changes while allowing users to keep, reset, or manually override them. | Low |
+| FR-04 | The system shall collect basic engagement signals using the user’s webcam (e.g., screen presence, gaze stability). | High |
+| FR-05 | The system shall adjust the duration of focus or break sessions based on user engagement and post-session feedback. | High |
+| FR-06 | The system shall prompt users to complete a short survey after each session (e.g., focus level, fatigue level). | Medium |
+| FR-07 | The system shall provide simple feedback or suggestions (e.g., break recommendation) based on detected engagement. | Medium |
+| FR-08 | The system shall allow users to manually override or ignore adaptive changes. | Low |
 | FR-09 | The system shall continue to function even when webcam input is unavailable. | Low |
 
 # **12\. Non-Functional Requirements**
@@ -210,13 +217,13 @@ Medium
 | ID | Requirement | Category |
 | ----- | ----- | ----- |
 | **NFR-01** | The system shall provide a clear and minimal interface so users can understand the timer status, session mode, and adaptive feedback without confusion. | Usability |
-| **NFR-02** | The system shall collect at least **1 engagement sample per second** during active webcam-based focus tracking when browser performance allows. | Performance |
-| **NFR-03** | The system shall keep timer operation stable while tracking runs and shall surface the latest engagement result after each completed focus session. | Performance |
+| **NFR-02** | The system shall process at least **5 webcam frames per second** to support basic real-time engagement estimation. | Performance |
+| **NFR-03** | The system shall update the user engagement status at least once every **5 seconds** to support timely adaptive feedback. | Performance |
 | **NFR-04** | The system shall request explicit user permission before accessing the webcam. | Security / Privacy |
-| **NFR-05** | The system shall continue to function even if the webcam is unavailable, using only timer controls and post-focus survey data. | Compatibility |
+| **NFR-05** | The system shall continue to function even if the webcam is unavailable, using only timer controls and post-session survey data. | Compatibility |
 | **NFR-06** | The system shall allow users to disable webcam-based engagement detection at any time. | Privacy / Usability |
 | **NFR-07** | The system shall provide clear feedback when webcam access is denied, unavailable, or not working properly. | Reliability |
-| **NFR-08** | The system shall work on modern desktop browsers, with Chrome and Edge recommended for webcam-based tracking. Standard timer mode should remain available in other supported browsers. | Compatibility |
+| **NFR-08** | The system shall work on modern desktop browsers such as Chrome, Edge, or Firefox. | Compatibility |
 | **NFR-09** | The system shall avoid storing raw webcam video or images to protect user privacy. | Security / Privacy |
 | **NFR-10** | The system shall maintain stable timer operation even if engagement detection fails or becomes inaccurate. | Reliability |
 
@@ -228,7 +235,7 @@ Medium
  User
 
 **Goal:**  
- The user wants to complete a long, deep reading session on a computer while receiving adaptive Pomodoro support based on engagement and post-focus feedback.
+ The user wants to complete a long, deep reading session on a computer while receiving adaptive Pomodoro support based on engagement and post-session feedback.
 
 ## **Main Flow**
 
@@ -236,32 +243,33 @@ Medium
     The system displays the Pomodoro timer interface and explains that webcam-based engagement detection is optional.  
 2. **The user grants webcam permission or chooses to continue without webcam access.**  
     The system starts preparing the session settings and shows the current mode as “Focus Session with default 25 minutes session.”  
-3. **The user completes the baseline survey before the first focus session.**  
-    The system stores the baseline readiness score as the first reference for later adaptive comparison.  
-4. **The user starts a focus session.**  
+3. **The user starts a focus session.**  
     The system begins the countdown timer and displays the remaining focus time clearly.  
-5. **The user performs a deep reading task on the computer.**  
-    If webcam access is available, the system monitors basic engagement signals, such as screen presence and sustained disengagement. The current focus session is not automatically extended or shortened based on these signals.  
-6. **The focus session ends when the timer reaches the planned duration.**   
-    The system stops focus tracking for that session and asks the user to complete a short post-focus survey. The user may submit or skip it.  
-7. **The system calculates the adaptive decision.**  
-    The system combines available webcam engagement data and survey readiness data to calculate the next focus and break durations.  
-8. **The system auto-applies the next cycle settings.**  
-    The user sees a short explanation and can keep the recommendation, reset to defaults, or manually customize the next focus/break duration.  
-9. **The break session starts.**  
-    After the break ends, the system prepares the next focus session using the updated adaptive settings.  
+4. **The user performs a deep reading task on the computer.**  
+    The system monitors basic engagement signals, such as screen presence and gaze stability, if webcam access is available.  
+5. **The system estimates the user’s engagement during the session.**  
+    If engagement is high, the system extends the user’s focus session. If engagement is medium to high, system transitions to a break when focus session time is over and keeps break and focus session time stable. If engagement is medium to low, system will increase next break time and decrease next study time. If engagement is low the system will suggest an early break.  
+6. **The focus session ends when the timer reaches the planned duration or when the system recommends an early break and the user accepts it.**   
+    The system shows an alert and automatically transitions to a break session.  
+7. **The user completes the break session.**  
+    The system ends the session cycle and asks the user to complete a short post-session survey, users have the option to skip it.  
+8. **The user submits feedback about focus and fatigue.**  
+    The system uses the survey response together with engagement signals to adjust the next Pomodoro session.  
+9. **The system prepares the next session with adaptive settings.**  
+    The user can accept the adaptive recommendation or manually override it.  
+10.  WILL add some later \!\!\!
 
     ## **Alternative / Exception Flow**
 
 | Condition | System Response |
 | ----- | ----- |
-| **If the user denies webcam permission** | The system continues with normal Pomodoro functions and uses only post-focus survey data for adaptation. |
+| **If the user denies webcam permission** | The system continues with normal Pomodoro functions and uses only post-session survey data for adaptation. |
 | **If webcam input becomes unavailable during a session** | The system displays a short notice and keeps the timer running normally. |
-| **If engagement appears low for 30 seconds or more** | The system records a sustained low-engagement event and uses it as one input for the next adaptive decision. |
-| **If the user disagrees with the auto-applied adaptive recommendation** | The system allows the user to keep, reset, shorten, or extend the next session manually. |
+| **If engagement appears low for a certain period** | The system shows a gentle suggestion, such as “You may need a short break” or “Try to refocus on your reading.” depend on the users data. |
+| **If the user disagrees with the adaptive recommendation** | The system allows the user to manually keep, shorten, or extend the next session. |
 | **If the user pauses the timer** | The system pauses both the countdown and engagement monitoring until the user resumes. |
-| **If the user resets the session** | The system ends the current session and returns to the initial timer state. |
-| **If the user skips the post-focus survey** | The system uses only available engagement data. |
+| **If the user resets or stops the session** | The system ends the current session and returns to the initial timer state. |
+| **If the user skips the post-session survey** | The system uses only available engagement data. |
 
     # **14\. Information Architecture/Wireframe**
 
@@ -279,18 +287,18 @@ The product is organized into the following main sections:
 
 * Displays the current session mode: Focus / Break / Paused  
 * Shows the remaining time clearly  
-* Provides core controls: Start, Pause/Resume, Reset  
+* Provides core controls: Start, Pause/Resume, Reset, Stop  
 * Shows a simple engagement status indicator when webcam detection is enabled
 
   ### **3\. Adaptive Feedback / Recommendation**
 
-* Displays a short explanation for adaptive changes  
-* Shows auto-applied changes for the next focus and break duration  
-* Allows users to keep, reset, or manually override adaptive recommendations
+* Displays gentle suggestions based on engagement patterns  
+* Shows recommended changes for the next session duration  
+* Allows users to accept or manually override adaptive recommendations
 
-  ### **4\. Post-focus Survey**
+  ### **4\. Post-session Survey**
 
-* Collects simple self-report data after each focus session  
+* Collects simple self-report data after each session  
 * Includes focus level and fatigue level questions  
 * Allows users to skip the survey if they do not want to answer
 
@@ -298,7 +306,7 @@ The product is organized into the following main sections:
 
 * Allows users to enable or disable webcam-based engagement detection  
 * Explains that raw webcam images or videos are not stored  
-* Allows users to manually adjust focus and break durations
+* Allows users to adjust default focus and break durations
 
   ## **Wireframe / Main Screens**
 
@@ -321,8 +329,8 @@ The product is organized into the following main sections:
 
 * Large timer display  
 * Current mode indicator: Focus / Break / Paused  
-* Core control buttons: Start, Pause/Resume, Reset  
-* Engagement status indicator: High / Medium / Low / Unavailable  
+* Core control buttons: Start, Pause/Resume, Reset, Stop  
+* Engagement status indicator: Stable / Low / Unavailable  
 * Gentle feedback message area  
 * Current session information: Session number, focus duration, break duration
 
@@ -334,15 +342,15 @@ The product is organized into the following main sections:
 **Main elements:**
 
 * Summary of previous session  
-* Engagement result: High / Medium / Low / Unavailable  
+* Engagement result: Stable / Unstable / Not available  
 * Recommended next session duration  
-* Buttons: Keep / Reset Defaults / Customize Manually  
+* Buttons: Accept Recommendation / Keep Default / Customize Manually  
 * Short explanation of why the recommendation was made
 
 **Purpose:**  
  To keep adaptive behavior transparent and give users control over system changes.
 
-### **Screen 4: Post-focus Survey Screen**
+### **Screen 4: Post-session Survey Screen**
 
 **Main elements:**
 
@@ -360,8 +368,8 @@ The product is organized into the following main sections:
 **Main elements:**
 
 * Enable/disable webcam detection toggle  
-* Focus duration adjustment  
-* Break duration adjustment  
+* Default focus duration setting  
+* Default break duration setting  
 * Privacy explanation  
 * Browser compatibility note
 
@@ -374,7 +382,7 @@ The product will be considered successful if:
 
 * 80% of users report that the adaptive timer intervals felt "more natural" than fixed intervals.  
 * Users show a 20% increase in total "Deep Work" time compared to using a standard 25-minute fixed timer.  
-* Webcam engagement classification aligns with post-focus self-report trends in at least 75% of tested sessions.
+* System detects user fatigue through webcam accurately 75% of the time (cross-check with post-session survey)
 
 ## **16\. Risks / Constraints**
 
@@ -382,13 +390,13 @@ The product will be considered successful if:
 
 * **Privacy Concerns:** Users may be uncomfortable with active webcam monitoring.  
 * **False Positives:** Reading a physical book next to the computer might be detected as "not focused".  
-* **Camera Unavailability:** A technical failure, the webcam being reserved by another app or the user denying webcam access may lead to loss of webcam-based engagement data.  
-* **Survey Refusal:** Low user participation in post-focus self-reports may reduce the system's ability to calibrate for future sessions.
+* **Camera Unavailability:** A technical failure, the webcam being reserved by another app or the user denying webcam access may lead to loss of real-time fatigue level data.  
+* **Survey Refusal:** Low user participation in post-session self-reports, may reduce the system's ability to calibrate for future sessions.
 
 ### **Constraints**
 
 * **Hardware:** Limited by the quality and field of view of the user's built-in laptop webcam.  
-* **Environment:** Low-light conditions may significantly degrade webcam-based engagement detection.  
+* **Environment:** Low-light conditions may significantly degrade gaze stability detection.  
 * **Development Time:** Project must be completed within the academic timeline of a single semester.  
 * **App Resources:** System must be lightweight enough to run parallel to other apps like demanding browsers or document readers.  
 * **Tools:** Project must be developed using open-source and version control tools like git, GitHub, Python and VSCode.
@@ -405,3 +413,4 @@ The product will be considered successful if:
 | **M6. Engagement Detection & Adaptive Logic (05/18 \- 06/03)** | Implement webcam-based engagement detection, adaptive timer rules, and fallback behavior. |
 | **M7. Testing & Refinement (06/03 \- 06/11)** | Test core functions, webcam cases, survey flow, adaptive recommendations, and fix bugs. |
 | **M8. Final Documentation & Presentation (06/12)** | Complete README, Git management, demo video, final slides, and presentation preparation. |
+
