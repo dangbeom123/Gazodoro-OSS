@@ -67,7 +67,7 @@ Privacy rules:
 - `develop`: integration branch
 - `feature/*`: individual feature branches
 - `docs/*`: documentation branches
-- `hotfix/*`: bug fix branches
+- `fix/*`: bug fix branches
 
 ## Known Limitations
 
