@@ -42,3 +42,24 @@ Gazodoro helps users maintain focus and manage fatigue during long-form reading 
 - `feature/*`: individual feature branches
 - `docs/*`: documentation branches
 - `fix/*`: bug fix branches
+
+## Known Limitations
+
+- Gazodoro is a prototype, not a production-ready productivity tool.
+- Webcam engagement is only a rough signal and does not directly measure concentration, productivity, or fatigue.
+- Gaze detection may be inaccurate in low light, with poor camera quality, or when the user reads physical material beside the screen.
+- Adaptive logic is rule-based and may need tuning after usability testing.
+- Data is currently stored in memory only; refreshing the page clears local session results.
+- There is no backend, account system, or cloud sync.
+- WebGazer requires a local server and may not work correctly from `file://` or some `127.0.0.1` setups.
+
+## Screenshots
+
+Design references are available in [`docs/design`](docs/design/), including onboarding, timer, camera mode, break states, settings, and survey-related screens.
+
+Useful files:
+
+- [`docs/design/1. Onboarding Screen.png`](docs/design/1.%20Onboarding%20Screen.png)
+- [`docs/design/2. Main timer screen.png`](docs/design/2.%20Main%20timer%20screen.png)
+- [`docs/design/2.3 Main timer screen - camera mode.png`](docs/design/2.3%20Main%20timer%20screen%20-%20camera%20mode.png)
+- [`docs/design/UI_FLOW.md`](docs/design/UI_FLOW.md)
